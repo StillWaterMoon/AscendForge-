@@ -248,17 +248,30 @@ class Database:
         return conn
 
     def init(self) -> None:
-        conn = self.connect()
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(SCHEMA)
-            conn.execute(
-                "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(SCHEMA_VERSION),),
-            )
-        finally:
-            conn.close()
+        # The web and worker processes may start simultaneously on a fresh data
+        # directory.  WAL negotiation / schema creation can transiently hit
+        # "database is locked"; retry with a bounded backoff instead of crashing.
+        deadline = time.monotonic() + 30.0
+        last: Exception | None = None
+        while time.monotonic() < deadline:
+            conn = self.connect()
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.executescript(SCHEMA)
+                conn.execute(
+                    "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(SCHEMA_VERSION),),
+                )
+                return
+            except sqlite3.OperationalError as exc:
+                last = exc
+                if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                    raise
+                time.sleep(0.25)
+            finally:
+                conn.close()
+        raise RuntimeError(f"database initialization did not complete: {last}")
 
     @contextmanager
     def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:
