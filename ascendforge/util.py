@@ -195,7 +195,10 @@ def shanghai_day(ts: float | None = None) -> str:
 
         moment = datetime.fromtimestamp(ts, tz=ZoneInfo(TZ_NAME))
     except Exception:  # pragma: no cover - tzdata missing
-        moment = datetime.fromtimestamp(ts, tz=timezone.utc)
+        # Asia/Shanghai has been UTC+8 without DST since 1991.
+        from datetime import timedelta
+
+        moment = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8)))
     return moment.strftime("%Y-%m-%d")
 
 
@@ -206,6 +209,11 @@ def next_day_start(ts: float | None = None) -> float:
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(TZ_NAME)
+    except Exception:  # pragma: no cover - tzdata missing
+        from datetime import timedelta
+
+        tz = timezone(timedelta(hours=8))
+    try:
         moment = datetime.fromtimestamp(ts, tz=tz)
         tomorrow = (moment + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         return tomorrow.timestamp()

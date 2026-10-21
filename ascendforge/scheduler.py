@@ -476,7 +476,17 @@ class Scheduler:
         try:
             return max(5, min(3600, int(float(str(raw)))))
         except (TypeError, ValueError):
-            return 60
+            pass
+        if raw:
+            try:
+                from email.utils import parsedate_to_datetime
+
+                target = parsedate_to_datetime(str(raw))
+                if target is not None:
+                    return max(5, min(3600, int(target.timestamp() - now())))
+            except (TypeError, ValueError, OverflowError):
+                pass
+        return 60
 
     def _schedule_reconcile(self, submission_id: str, delay: float = 5.0) -> None:
         self.db.execute(

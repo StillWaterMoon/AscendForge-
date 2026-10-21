@@ -437,7 +437,7 @@ async function renderDashboard() {
       </table></div>` : `<div class="empty">还没有任务。先连接 CANNJudge 与模型，再新建一个题目任务。</div>`}
     </div>`;
 
-  $('#new-task').addEventListener('click', openNewTaskModal);
+  $('#new-task').addEventListener('click', () => openNewTaskModal().catch((e) => toast(e.message || '打开表单失败', 'error')));
   $('#refresh-dashboard').addEventListener('click', () => renderDashboard().catch((e) => toast(e.message, 'error')));
   $$('[data-task-open]').forEach((row) => row.addEventListener('click', () => navigate(`#/tasks/${row.dataset.taskOpen}`)));
 }

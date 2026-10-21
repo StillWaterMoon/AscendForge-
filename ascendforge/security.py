@@ -57,7 +57,19 @@ def load_master_key(key_file: Path, env_key: str = "") -> bytes:
         except Exception as exc:
             raise SecurityError(f"invalid master key file: {key_file}") from exc
     key = Fernet.generate_key()
-    fd = os.open(str(key_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        fd = os.open(str(key_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Web and worker may start simultaneously on a fresh data directory.
+        # The other process may still be writing; retry briefly.
+        for _ in range(40):
+            try:
+                existing = key_file.read_bytes().strip()
+                Fernet(existing)
+                return existing
+            except Exception:
+                time.sleep(0.05)
+        raise SecurityError(f"invalid master key file: {key_file}")
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(key)
