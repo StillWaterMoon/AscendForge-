@@ -10,7 +10,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - **真实登录、题目导入、一次真实提交、远端 ID、结果查询与独立读回已完成**（2026-10-21，CopySign，remote id `6ad84d04193e507d8e4a0502`）。提交的是模板基线，平台返回 `Runtime Error`（15/15），**不代表算子通过**。
 > - 提交字节与快照逐字节一致：snapshot `3aa9af10...b377b95`，`kernel.asc` SHA-256 `022d2dd0...f8641f`，远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
-> - 67 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 74 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 > - Agent 已用 DeepSeek 真实迭代：3 次编译错误 + 1 次 `Wrong Answer`，均保存远端反馈；任务已暂停，未拿到 `Pass`。诊断见 [Agent 编译错误诊断](docs/agent-compile-diagnosis.md)。
 
@@ -125,10 +125,19 @@ ascendforge/
     executor.py          Docker / 本地子进程隔离执行
     capabilities.py      NPU/CANN/Docker 诚实检测
   backup.py, cli.py, db.py, states.py
-skills/                  三个显式加载的 SKILL.md
-tests/                   67 个 unittest
+skills/                  四个 SKILL.md（通用优化 + Ascend 平台 + 测试生成 + 工作台规范）
+tests/                   74 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
+
+提示词分层：
+
+- 通用优化方法：`skills/optimize-operator/SKILL.md`
+- Ascend/CANNJudge 约束：`skills/optimize-ascend-operator/SKILL.md`
+- 测试生成：`skills/generate-operator-tests/SKILL.md`
+- 题目目标/约束：任务配置里的 `strategy_prompt`，可在新建任务或任务详情“题目策略”中填写
+- 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
+
 ```
 
 ## 数据布局

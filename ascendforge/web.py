@@ -71,7 +71,7 @@ from .security import (
     verify_password,
 )
 from .states import TASK_TERMINAL
-from .tasks import TaskError, TaskService
+from .tasks import TaskError, TaskService, normalize_config
 from .util import canonical_json, iso, json_dumps, json_loads, new_id, now, safe_relpath, sha256_bytes, truncate_text
 
 log = logging.getLogger(__name__)
@@ -226,6 +226,7 @@ class App:
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/continue-optimization$", "h_continue_optimization", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
@@ -797,6 +798,30 @@ class Handler(BaseHTTPRequestHandler):
         self.app.db.insert(
             "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
             ((session or {}).get("username"), "continue_optimization", task_id, "{}", now()),
+        )
+        return self.h_task_detail(task_id)
+
+    def h_update_strategy(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        body = self._read_json()
+        strategy = body.get("strategy_prompt", "")
+        if not isinstance(strategy, str):
+            raise ApiError(400, "BAD_STRATEGY", "strategy_prompt 必须是字符串")
+        config = normalize_config({"strategy_prompt": strategy}, base=task.get("config") or {})
+        self.app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        add_event(
+            self.app.db,
+            task_id,
+            None,
+            "strategy_updated",
+            {"actor": (session or {}).get("username", "user"), "chars": len(strategy)},
+        )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            ((session or {}).get("username"), "update_strategy", task_id, json_dumps({"chars": len(strategy)}), now()),
         )
         return self.h_task_detail(task_id)
 

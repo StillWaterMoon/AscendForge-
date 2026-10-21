@@ -5,6 +5,14 @@ description: 根据题目合同、服务器本地测试和 CANNJudge 评测反�
 
 # 迭代优化昇腾算子
 
+通用方法由 `optimize-operator` skill 提供；本 skill 只补充 Ascend C / CANNJudge 的平台约束。
+
+- `GlobalTensor<T>` 用 `SetGlobalBuffer((__gm__ T*)ptr, n)` 构造，禁止 `reinterpret_cast<GlobalTensor<T>>`。
+- 不确定某个 Ascend C API 是否存在时，先查模板注释、CANN 头文件或已验证示例；不要凭名字猜 `Ands` 之类的接口。
+- 被 `__global__ __vector__` kernel 调用的 helper 必须标 `__aicore__`；被 host `run_kernel` 调用的 helper 必须是 host 函数，不能混用。
+- 题目合同列出的 dtype/shape 都要覆盖；不能只按样例的 int8 或某个 shape 写死。按 32B 对齐时不得越界读写真实缓冲区。
+- 没有 CANN/NPU 时，本地静态检查通过不等于远端编译通过；如实标注未验证。
+
 读取题目接口、合法输入范围、精度要求、设备信息、实际评分规则和已有实验。缺少影响正确性的合同字段时请求补充，不臆造。
 
 先建立符合接口的基线。每轮给出简短、可验证的优化假设，选择一个或少量相互关联的修改，保存父版本、代码快照和修改说明。

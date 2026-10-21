@@ -44,7 +44,13 @@
 
 参数：`{"limit": 20}`
 
-返回最近 attempts（状态、父版本、快照摘要、结果、提交状态、本地校验）和 best。
+返回最近 attempts（状态、父版本、快照摘要、结果、提交状态、本地校验）和 best。只返回摘要，不返回源码。
+
+### `read_attempt_source`
+
+参数：`{"attempt_id": "att-..."}`；省略时读取当前 attempt 的父版本（没有父版本时读取 best）。
+
+返回该 attempt 的不可变快照、完整文件内容、SHA-256 和 hypothesis。用于在父代码上做最小修改，而不是从模板重写。
 
 ### `create_candidate`
 
@@ -59,9 +65,11 @@
 ```
 
 - 当前 attempt 只能绑定一次快照；第二次调用报 `SNAPSHOT_EXISTS`。
-- `npu_kernel_dev`：自动补齐缺失的 editable 模板文件；只读文件不可修改；额外文件只允许根目录 `.asc/.h`；禁止 `judge.asc`/`main.asc`/`data_utils.h`。
+- 默认父版本：显式 `parent_attempt_id` → 当前 attempt 的父版本 → 任务 best。
+- `npu_kernel_dev`：缺失的 editable 文件优先从父快照补齐，其次从原始模板补齐；父版本的其他 helper 文件也会保留；只读文件不可修改；额外文件只允许根目录 `.asc/.h`；禁止 `judge.asc`/`main.asc`/`data_utils.h`。
 - 传统工程：校验四字段文件。
-- 成功返回 `snapshot_id`、聚合 SHA-256、文件清单、`filled_from_template`。
+- 快照前运行静态 preflight，拒绝 `reinterpret_cast<GlobalTensor<...>>`、`AscendC::Ands` 等已知不可用写法；dtype 覆盖不足给出 warning。
+- 成功返回 `snapshot_id`、聚合 SHA-256、文件清单、`parent_attempt_id`、`filled_from_parent`、`filled_from_template`、`preflight`。
 
 ### `create_test_generator`
 

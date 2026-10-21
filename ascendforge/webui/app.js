@@ -463,6 +463,10 @@ async function openNewTaskModal() {
         <div class="field span-2"><label for="nt-title">任务标题</label><input id="nt-title" type="text" maxlength="120" placeholder="例如：Add 核函数 · 第一轮优化" required></div>
         <div class="field span-2"><label for="nt-url">CANNJudge 题目链接</label><input id="nt-url" type="url" placeholder="https://cannjudge.cn/hc_cann_codelabs/cann/add" required>
           <div class="hint">必须是完整的小组/比赛/题目链接。导入时会下载模板并校验账号权限。</div></div>
+        <div class="field span-2"><label for="nt-strategy">题目策略（可选）</label>
+          <textarea id="nt-strategy" rows="4" maxlength="8000" placeholder="例如：本题进入性能优化阶段，重点研究 UB 分块与 DataCopy 重叠；先保证 int8/int16/int32/fp16/fp32 全部正确，再优化。"></textarea>
+          <div class="hint">只放题目目标、约束和待验证假设；通用优化方法由 optimize-operator skill 提供。</div>
+        </div>
       </div>
       <details class="advanced">
         <summary>预算与调度（可选）</summary>
@@ -524,6 +528,7 @@ async function openNewTaskModal() {
     putNum('#cfg-target', 'target_score', false);
     config.metric = $('#cfg-metric').value;
     if ($('#cfg-time-unit').value.trim()) config.time_unit = $('#cfg-time-unit').value.trim();
+    if ($('#nt-strategy').value.trim()) config.strategy_prompt = $('#nt-strategy').value.trim();
     try {
       const data = await api('/api/tasks', {
         method: 'POST',
@@ -597,6 +602,7 @@ async function renderTask(taskId) {
         ${task.status === 'completed' && task.stop_reason === 'manual_baseline_finished' && task.model_configured ? '<button class="btn btn-primary" data-continue-opt="1">继续自动优化</button>' : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
+        <button class="btn btn-ghost" data-strategy="1" type="button">题目策略</button>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
       </div>
     </div>
@@ -651,6 +657,8 @@ async function renderTask(taskId) {
   if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
   const continueButton = $('[data-continue-opt]');
   if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
+  const strategyButton = $('[data-strategy]');
+  if (strategyButton) strategyButton.addEventListener('click', () => openStrategyModal(task));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -662,6 +670,44 @@ async function renderTask(taskId) {
     button.addEventListener('click', () => openResolveModal(task.id, button.dataset.resolve));
   });
   window.scrollTo(0, scroll);
+}
+
+async function openStrategyModal(task) {
+  const current = String((task.config || {}).strategy_prompt || '');
+  openModal('题目策略', `
+    <form id="strategy-form" class="stack">
+      <div class="alert info">通用优化方法由 <span class="mono">optimize-operator</span> skill 提供。这里只写本题的目标、约束和待验证假设，例如“先覆盖全部 dtype，再优化 UB 分块”。</div>
+      <div class="field"><label for="strategy-text">策略文本</label>
+        <textarea id="strategy-text" rows="10" maxlength="8000" placeholder="本题进入性能优化阶段，重点研究……">${esc(current)}</textarea>
+        <div class="hint">保存后，下一次模型调用会把它注入任务上下文；不会影响已提交的快照。</div>
+      </div>
+      <div class="alert error" id="strategy-error" hidden></div>
+      <div class="form-actions">
+        <button class="btn" type="button" data-modal-close>取消</button>
+        <button class="btn btn-primary" type="submit">保存策略</button>
+      </div>
+    </form>`);
+  $('#strategy-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorBox = $('#strategy-error');
+    errorBox.hidden = true;
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api(`/api/tasks/${encodeURIComponent(task.id)}/strategy`, {
+        method: 'POST',
+        body: { strategy_prompt: $('#strategy-text').value.trim() },
+        requestId: uuid(),
+      });
+      closeModal();
+      toast('题目策略已保存', 'success');
+      renderTask(task.id).catch(() => {});
+    } catch (err) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message || '保存失败';
+      button.disabled = false;
+    }
+  });
 }
 
 function taskTabButton(key, label) {

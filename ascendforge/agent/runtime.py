@@ -54,7 +54,7 @@ from .tools import ToolExecutor
 
 log = logging.getLogger(__name__)
 
-SKILLS_FOR_OPTIMIZATION = ["optimize-ascend-operator", "generate-operator-tests"]
+SKILLS_FOR_OPTIMIZATION = ["optimize-operator", "optimize-ascend-operator", "generate-operator-tests"]
 MAX_CONTEXT_CHARS = 120_000
 MAX_STORED_MESSAGE_CHARS = 20_000
 
@@ -433,6 +433,20 @@ class AgentRuntime:
                         best_files = read_snapshot(self.db, self.settings, best["snapshot_id"])["files"]
                     except SnapshotError:
                         best_files = None
+            parent_files = None
+            parent_attempt = None
+            parent_id = attempt.get("parent_attempt_id") or task.get("best_attempt_id")
+            if parent_id:
+                candidate_parent = get_attempt(self.db, parent_id)
+                if candidate_parent and candidate_parent.get("snapshot_id"):
+                    try:
+                        parent_files = read_snapshot(
+                            self.db, self.settings, candidate_parent["snapshot_id"]
+                        )["files"]
+                        parent_attempt = candidate_parent
+                    except SnapshotError:
+                        parent_files = None
+                        parent_attempt = None
             normalized_attempts = []
             for item in attempt_history(self.db, task["id"], limit=20):
                 normalized_attempts.append(
@@ -446,6 +460,8 @@ class AgentRuntime:
                 attempt=attempt,
                 attempts=normalized_attempts,
                 best_files=best_files,
+                parent_files=parent_files,
+                parent_attempt=parent_attempt,
                 capabilities={
                     "npu": capabilities.get("npu"),
                     "candidate_execution": capabilities.get("candidate_execution"),

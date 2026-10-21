@@ -12,21 +12,33 @@ class SkillTests(unittest.TestCase):
     def test_required_skills_load_explicitly(self):
         registry = SkillRegistry(Path(__file__).resolve().parents[1] / "skills")
         names = {item["name"] for item in registry.list()}
-        self.assertEqual(names, {"build-cannjudge-workbench", "optimize-ascend-operator", "generate-operator-tests"})
-        block, meta = registry.prompt_block(["optimize-ascend-operator", "generate-operator-tests"])
+        self.assertEqual(
+            names,
+            {
+                "build-cannjudge-workbench",
+                "optimize-operator",
+                "optimize-ascend-operator",
+                "generate-operator-tests",
+            },
+        )
+        block, meta = registry.prompt_block(
+            ["optimize-operator", "optimize-ascend-operator", "generate-operator-tests"]
+        )
+        self.assertIn("算子迭代优化", block)
         self.assertIn("迭代优化昇腾算子", block)
         self.assertIn("生成算子测试", block)
-        self.assertEqual(len(meta), 2)
+        self.assertEqual(len(meta), 3)
         self.assertTrue(all(len(item["sha256"]) == 64 for item in meta))
 
     def test_runtime_prompt_includes_skills(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-skills-"))
         env = make_env(tmp)
         prompt, meta = env.runtime.system_prompt()
+        self.assertIn("optimize-operator", prompt)
         self.assertIn("optimize-ascend-operator", prompt)
         self.assertIn("generate-operator-tests", prompt)
         self.assertIn("request_submission", prompt)
-        self.assertEqual(len(meta), 2)
+        self.assertEqual(len(meta), 3)
 
 
 class TaskStateTests(unittest.TestCase):

@@ -63,10 +63,23 @@ TOOLS: dict[str, dict] = {
     },
     "read_history": {
         "name": "read_history",
-        "description": "Read previous attempts, hypotheses, snapshots and normalized remote results. Use it to avoid repeating failed ideas.",
+        "description": "Read previous attempts, hypotheses, snapshots and normalized remote results. This returns metadata only; use read_attempt_source for code.",
         "parameters": _schema(
             {"limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Number of recent attempts."}},
             description="Read experiment history.",
+        ),
+    },
+    "read_attempt_source": {
+        "name": "read_attempt_source",
+        "description": "Read the complete source snapshot of a previous attempt (default: the parent of the current attempt). Use this to make a minimal patch instead of rewriting from the template.",
+        "parameters": _schema(
+            {
+                "attempt_id": {
+                    "type": "string",
+                    "description": "Attempt id; omitted means the current attempt's parent.",
+                }
+            },
+            description="Read a historical candidate source.",
         ),
     },
     "create_candidate": {

@@ -30,6 +30,8 @@ def system_prompt(skill_block: str) -> str:
 6. Preserve the problem contract: interface signature, dtype, shape, layout, tolerance and allowed values come from the imported template. Do not invent missing constraints.
 7. Do not hard-code evaluation answers, exploit the judge, or weaken validation to gain score.
 8. Do not store or reveal private chain-of-thought. Give a short, testable hypothesis in the `hypothesis` field and a brief action `summary`.
+9. Start every non-first candidate from the provided parent source. Make a minimal, reviewable patch; preserve unchanged files. Do not rebuild from the template or from a summary unless this is the first candidate or the parent source is unavailable.
+10. Do not invent Ascend C APIs. Use only APIs present in the template comments, CANN headers, or verified examples. A static check passing is not a compile; a compile is not correctness.
 
 ## Action protocol (protocol_version "1")
 Return exactly one JSON object per turn, or use native tool calling when available:
@@ -40,7 +42,8 @@ Return exactly one JSON object per turn, or use native tool calling when availab
 
 Allowed tools:
 - `read_problem`: read the imported contract/template.
-- `read_history`: previous attempts and remote outcomes.
+- `read_history`: previous attempts and remote outcomes (metadata only).
+- `read_attempt_source`: read a previous attempt's full source (default: parent); use it for a minimal patch, never rebuild from summaries.
 - `create_candidate`: save an immutable candidate snapshot (files + hypothesis).
 - `create_test_generator`: store generator + independent reference sources (does not execute).
 - `run_local_validation`: run generator/reference in the isolated executor; candidate stays untested without an NPU.
@@ -133,11 +136,22 @@ def context_prompt(
     attempt: dict,
     attempts: list[dict],
     best_files: dict[str, str] | None,
-    capabilities: dict | None,
+    parent_files: dict[str, str] | None = None,
+    parent_attempt: dict | None = None,
+    capabilities: dict | None = None,
 ) -> str:
     config = task.get("config") or {}
     problem = task.get("problem") or {}
     template = task.get("template") or {}
+    strategy_text = str(config.get("strategy_prompt") or "").strip()
+    if strategy_text:
+        strategy_text = (
+            "Treat this as problem-specific goals/constraints and hypotheses, not as a "
+            "replacement for correctness or the imported contract:\n\n"
+            + truncate_text(strategy_text, 8000)
+        )
+    else:
+        strategy_text = "(none; follow the generic optimize-operator skill and the imported contract)"
     best_text = "(no best version yet)"
     if best_files:
         chunks = []
@@ -150,6 +164,25 @@ def context_prompt(
             chunks.append(piece)
             used += len(piece)
         best_text = "\n".join(chunks)
+    parent_text = "(no parent candidate; this is the first candidate and may use the template)"
+    if parent_files:
+        chunks = []
+        used = 0
+        header = ""
+        if parent_attempt:
+            header = (
+                f"attempt #{parent_attempt.get('ordinal')} "
+                f"(id {parent_attempt.get('id')}, parent of this attempt)\n"
+                f"hypothesis: {truncate_text(str(parent_attempt.get('hypothesis') or ''), 2000)}\n\n"
+            )
+        for path, content in sorted(parent_files.items()):
+            piece = f"### {path}\n{content}\n"
+            if used + len(piece) > 30_000:
+                chunks.append("... parent source truncated ...")
+                break
+            chunks.append(piece)
+            used += len(piece)
+        parent_text = header + "\n".join(chunks)
     current_state = {
         "task_status": task.get("status"),
         "attempt_status": attempt.get("status"),
@@ -174,6 +207,12 @@ code_template: {problem.get('code_template')}
 
 ## Experiment history (newest first)
 {_history(attempts, current_id=attempt.get('id'))}
+
+## Parent candidate source (start from this; minimal diff)
+{parent_text}
+
+## Problem-specific strategy (from the task owner)
+{strategy_text}
 
 ## Current best source (remote best only; may be empty)
 {best_text}

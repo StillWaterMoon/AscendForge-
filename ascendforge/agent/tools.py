@@ -38,6 +38,7 @@ from ..scheduler import Scheduler
 from ..states import ATTEMPT_FAILED, ATTEMPT_FINISHED
 from ..tasks import TaskError, TaskService
 from ..util import canonical_json, json_dumps, json_loads, new_id, now, sha256_bytes, truncate_text
+from .preflight import preflight_candidate
 from .protocol import Action, ActionError, tool_result_error, tool_result_ok
 
 log = logging.getLogger(__name__)
@@ -144,6 +145,7 @@ class ToolExecutor:
         handlers = {
             "read_problem": self._read_problem,
             "read_history": self._read_history,
+            "read_attempt_source": self._read_attempt_source,
             "create_candidate": self._create_candidate,
             "create_test_generator": self._create_test_generator,
             "run_local_validation": self._run_local_validation,
@@ -286,6 +288,47 @@ class ToolExecutor:
             "remote_best_note": "Only a measured passing remote result can be best; local/CPU reference results are separate.",
         }
 
+    def _read_attempt_source(self, task: dict, attempt: dict, arguments: dict) -> dict:
+        target_id = str(arguments.get("attempt_id") or "").strip()
+        if not target_id:
+            target_id = attempt.get("parent_attempt_id") or task.get("best_attempt_id") or ""
+        if not target_id:
+            raise ToolFailure(
+                "NO_PARENT_SOURCE",
+                "no parent attempt is available; use the template for the first candidate",
+                retryable=False,
+            )
+        target = self._attempt(task["id"], target_id)
+        if not target.get("snapshot_id"):
+            raise ToolFailure(
+                "NO_SNAPSHOT",
+                f"attempt {target_id} has no immutable source snapshot",
+                retryable=False,
+            )
+        bundle = read_snapshot(self.db, self.settings, target["snapshot_id"])
+        files = [
+            {
+                "path": path,
+                "bytes": len(content.encode("utf-8")),
+                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "content": content,
+            }
+            for path, content in sorted(bundle["files"].items())
+        ]
+        return {
+            "attempt_id": target["id"],
+            "ordinal": target.get("ordinal"),
+            "parent_attempt_id": target.get("parent_attempt_id"),
+            "hypothesis": target.get("hypothesis"),
+            "snapshot": {
+                "id": target["snapshot_id"],
+                "sha256": bundle["snapshot"]["sha256"],
+                "file_count": bundle["snapshot"]["file_count"],
+            },
+            "files": files,
+            "note": "This is the exact immutable source. Make a minimal patch; do not rebuild from summaries.",
+        }
+
     # ------------------------------------------------------------------
     # Candidate / generator
     # ------------------------------------------------------------------
@@ -319,14 +362,40 @@ class ToolExecutor:
 
         problem, template = self._decode(task)
         code_template = str(problem.get("code_template") or "registry")
+        explicit_parent = str(arguments.get("parent_attempt_id") or "").strip()
+        parent = explicit_parent or attempt.get("parent_attempt_id") or task.get("best_attempt_id") or ""
+        parent_attempt = get_attempt(self.db, parent) if parent else None
+        if parent and (not parent_attempt or parent_attempt["task_id"] != task["id"]):
+            raise ToolFailure("BAD_PARENT", "parent_attempt_id does not belong to this task", retryable=False)
+        if parent and explicit_parent and not parent_attempt.get("snapshot_id"):
+            raise ToolFailure("BAD_PARENT", "the requested parent has no immutable source snapshot", retryable=False)
+        parent_files: dict[str, str] = {}
+        if parent_attempt and parent_attempt.get("snapshot_id"):
+            try:
+                parent_files = read_snapshot(self.db, self.settings, parent_attempt["snapshot_id"])["files"]
+            except SnapshotError:
+                parent_files = {}
+
         filled: list[str] = []
+        filled_parent: list[str] = []
         if code_template == "npu_kernel_dev":
             template_files = CannjudgeAdapter._template_files(template)
             editable = {item["path"]: item["content"] for item in template_files if item["editable"]}
             for path, content in editable.items():
                 if path not in files:
+                    if path in parent_files:
+                        files[path] = parent_files[path]
+                        filled_parent.append(path)
+                    else:
+                        files[path] = content
+                        filled.append(path)
+            # Preserve helper files from the parent unless the model replaced
+            # or deliberately omitted them.  This makes candidates patches,
+            # not rewrites from the original template.
+            for path, content in parent_files.items():
+                if path not in files and path not in editable:
                     files[path] = content
-                    filled.append(path)
+                    filled_parent.append(path)
             payload = CannjudgeAdapter._kernel_files(template, files)
             files = {item["path"]: item["content"] for item in payload}
         else:
@@ -335,11 +404,16 @@ class ToolExecutor:
         hypothesis = str(arguments.get("hypothesis") or "").strip()
         if not hypothesis:
             raise ToolFailure("BAD_HYPOTHESIS", "hypothesis is required", retryable=False)
-        parent = arguments.get("parent_attempt_id")
-        if parent:
-            parent_attempt = get_attempt(self.db, str(parent))
-            if not parent_attempt or parent_attempt["task_id"] != task["id"]:
-                raise ToolFailure("BAD_PARENT", "parent_attempt_id does not belong to this task", retryable=False)
+        check = preflight_candidate(files, problem)
+        if not check["ok"]:
+            details = "; ".join(
+                f"{item['path']}:{item['line']} {item['message']}" for item in check["errors"][:5]
+            )
+            raise ToolFailure(
+                "PREFLIGHT_FAILED",
+                "candidate rejected before snapshot: " + details,
+                retryable=False,
+            )
         snapshot = attach_snapshot(
             self.db,
             self.settings,
@@ -362,6 +436,7 @@ class ToolExecutor:
                 "files": snapshot["file_count"],
                 "bytes": snapshot["total_bytes"],
                 "hypothesis": hypothesis[:500],
+                "preflight_warnings": check["warnings"],
             },
         )
         return {
@@ -370,7 +445,10 @@ class ToolExecutor:
             "file_count": snapshot["file_count"],
             "total_bytes": snapshot["total_bytes"],
             "files": json_loads(snapshot["files_json"], []),
+            "parent_attempt_id": parent or None,
             "filled_from_template": filled,
+            "filled_from_parent": filled_parent,
+            "preflight": check,
             "next": "Call request_submission to enqueue this exact snapshot. Do not modify it in place.",
         }
 
@@ -560,6 +638,18 @@ class ToolExecutor:
         self._require_running(task)
         if not attempt.get("snapshot_id"):
             raise ToolFailure("NO_SNAPSHOT", "create_candidate first; only an immutable snapshot can be submitted")
+        bundle = read_snapshot(self.db, self.settings, attempt["snapshot_id"])
+        problem, _ = self._decode(task)
+        check = preflight_candidate(bundle["files"], problem)
+        if not check["ok"]:
+            details = "; ".join(
+                f"{item['path']}:{item['line']} {item['message']}" for item in check["errors"][:5]
+            )
+            raise ToolFailure(
+                "PREFLIGHT_FAILED",
+                "snapshot rejected before submission: " + details,
+                retryable=False,
+            )
         submission = self.scheduler.request_submission(task["id"], attempt["id"])
         return {
             "submission_id": submission["id"],

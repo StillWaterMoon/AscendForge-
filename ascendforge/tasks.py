@@ -67,6 +67,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "max_local_seconds": 30,
     "prompt_version": "v1",
     "manual_only": False,
+    "strategy_prompt": "",
 }
 
 
@@ -120,6 +121,12 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
         raise TaskError("BAD_CONFIG", "使用 time 指标时必须明确 time_unit（平台时间单位未被假定）")
     config["prompt_version"] = str(config.get("prompt_version") or "v1")[:32]
     config["manual_only"] = bool(config.get("manual_only", False))
+    strategy = config.get("strategy_prompt") or ""
+    if not isinstance(strategy, str):
+        raise TaskError("BAD_CONFIG", "strategy_prompt 必须是字符串")
+    if len(strategy) > 8000:
+        raise TaskError("BAD_CONFIG", "strategy_prompt 不能超过 8000 字符")
+    config["strategy_prompt"] = strategy
     return config
 
 

@@ -200,6 +200,15 @@ class WebTests(unittest.TestCase):
 
         status, payload = self.client.request(
             "POST",
+            f"/api/tasks/{task['id']}/strategy",
+            {"strategy_prompt": "先覆盖 dtype，再优化分块"},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["config"]["strategy_prompt"], "先覆盖 dtype，再优化分块")
+
+        status, payload = self.client.request(
+            "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,
