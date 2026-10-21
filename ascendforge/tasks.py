@@ -215,6 +215,19 @@ class TaskService:
             "current_attempt": current_attempt(self.db, task_id),
             "counts": {
                 "attempts": len(attempts),
+                "candidates": int(
+                    self.db.scalar(
+                        "SELECT COUNT(*) FROM attempts WHERE task_id=? AND snapshot_id IS NOT NULL", (task_id,)
+                    )
+                    or 0
+                ),
+                "infrastructure_failures": int(
+                    self.db.scalar(
+                        "SELECT COUNT(*) FROM attempts WHERE task_id=? AND status='failed' AND snapshot_id IS NULL",
+                        (task_id,),
+                    )
+                    or 0
+                ),
                 "submissions": len(submissions),
                 "events": int(self.db.scalar("SELECT COUNT(*) FROM events WHERE task_id=?", (task_id,)) or 0),
             },

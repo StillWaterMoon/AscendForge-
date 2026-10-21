@@ -122,6 +122,13 @@ class Scheduler:
             config = json_loads(config, {})
         usage = usage_summary(self.db, task["id"])
         attempts = int(self.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (task["id"],)) or 0)
+        candidates = int(
+            self.db.scalar(
+                "SELECT COUNT(*) FROM attempts WHERE task_id=? AND snapshot_id IS NOT NULL",
+                (task["id"],),
+            )
+            or 0
+        )
         finished = int(
             self.db.scalar(
                 "SELECT COUNT(*) FROM attempts WHERE task_id=? AND status IN ('finished','failed')",
@@ -138,6 +145,7 @@ class Scheduler:
         runtime = max(0.0, now() - (task.get("started_at") or now()))
         return {
             "attempts": attempts,
+            "candidates": candidates,
             "finished_attempts": finished,
             "submissions_sent": sent,
             "sends_today": self._sent_since(self._day_start(), task["id"]),
@@ -171,7 +179,7 @@ class Scheduler:
         report = self.budget_report(task)
         if task["status"] != TASK_RUNNING:
             return Reservation(False, f"task_not_running:{task['status']}")
-        if report["attempts"] >= int(config.get("max_attempts") or 10**9):
+        if report["candidates"] >= int(config.get("max_attempts") or 10**9):
             return Reservation(False, "max_attempts")
         if report["model_calls"] >= int(config.get("max_model_calls") or 10**9):
             return Reservation(False, "max_model_calls")
@@ -785,7 +793,7 @@ class Scheduler:
                     reason = f"target_score_reached:{value}"
                 elif metric.get("direction") == "lower" and float(value) <= float(target):
                     reason = f"target_score_reached:{value}"
-        if reason is None and report["attempts"] >= int(config.get("max_attempts") or 10**9):
+        if reason is None and report["candidates"] >= int(config.get("max_attempts") or 10**9):
             reason = "max_attempts_reached"
         if reason is None and report["submissions_sent"] >= int(config.get("max_submissions_per_task") or 10**9):
             reason = "max_submissions_reached"

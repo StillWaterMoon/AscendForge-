@@ -605,7 +605,7 @@ async function renderTask(taskId) {
 
     <div class="grid grid-4" style="margin-bottom:16px">
       <div class="metric"><div class="metric-label">远端最好</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '仅通过且可比的远端结果' : '暂无')}</div></div>
-      <div class="metric"><div class="metric-label">尝试 / 提交</div><div class="metric-value">${esc(usage.attempts ?? task.counts?.attempts ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">上限 ${esc(config.max_attempts ?? '—')} / ${esc(config.max_submissions_per_task ?? '—')}</div></div>
+      <div class="metric"><div class="metric-label">候选 / 提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">上限 ${esc(config.max_attempts ?? '—')} / ${esc(config.max_submissions_per_task ?? '—')}</div></div>
       <div class="metric"><div class="metric-label">下一次提交</div><div class="metric-value small">${esc(quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待 agent')}</div><div class="metric-note">间隔 ${esc(config.min_submit_interval_sec ?? '—')}s · 在途 ${esc(quota.inflight ?? 0)}</div></div>
       <div class="metric"><div class="metric-label">模型用量</div><div class="metric-value small">${esc(usage.calls ?? 0)} 次</div><div class="metric-note">${esc(usage.total_tokens ?? 0)} tokens · ${usage.cost_complete ? esc(formatCost(usage.known_cost)) : '费用未知'}</div></div>
     </div>
