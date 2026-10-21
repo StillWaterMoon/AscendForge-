@@ -7,10 +7,10 @@
 
 | 项目 | 结论 |
 |---|---|
-| AscendForge 自身闭环 | 已实现并测试（55 个 unittest） |
+| AscendForge 自身闭环 | 已实现并测试（56 个 unittest） |
 | CANNJudge 公开题目/模板/ZIP | **真实联网验证通过** |
-| CANNJudge 登录 | 端点存在（400 password required）；**真实登录未验证** |
-| CANNJudge 真实提交/结果 | 端点存在；**未用真实账号验证** |
+| CANNJudge 登录 | **真实登录已由用户在 Web 完成**（账号已连接，题目权限已验证，密码未保存） |
+| CANNJudge 真实提交/结果 | 端点存在、登录已通；**真实提交/结果待执行**（可用手动基线） |
 | NPU / CANN | 开发机不可用；HiDevLab 950 申请审批中 |
 | 数据生成/CPU 参考 | 已实现隔离执行；候选 Ascend C 永远标记 untested（无 NPU） |
 | 自定义远端测试 | 未核实；禁用 |
@@ -121,8 +121,8 @@ GET /api/submissions/does-not-exist
 
 | 阻塞 | 需要的操作 |
 |---|---|
-| 真实 CANNJudge 登录 | 用户在 Web「平台连接」输入账号密码；或提供可用的会话导入材料 |
-| 真实提交与结果 | 用户授权一次提交；建议先手动在平台确认题目可提交 |
+| 真实 CANNJudge 登录 | **已完成**：账号已在 Web 连接并验证题目权限 |
+| 真实提交与结果 | 用户授权一次提交；在任务详情点击“提交基线（手动）”即可不依赖模型完成 |
 | HiDevLab 950 服务器 | 审批通过后部署、确认网络出口、Docker/CANN/NPU |
 | 模型 API | 用户提供 base_url/key/model；需实测网关兼容性 |
 | HTTPS/域名 | 配置反向代理；设置 `ASCENDFORGE_SECURE_COOKIES=true` |

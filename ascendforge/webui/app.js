@@ -590,6 +590,7 @@ async function renderTask(taskId) {
       </div>
       <div class="toolbar">
         ${task.status === 'pending' ? '<button class="btn btn-primary" data-task-action="start">开始</button>' : ''}
+        ${(task.counts?.attempts || 0) === 0 && ['pending', 'running'].includes(task.status) ? '<button class="btn" data-baseline-submit="1" title="不依赖模型，直接提交一次模板基线">提交基线（手动）</button>' : ''}
         ${task.status === 'running' ? '<button class="btn" data-task-action="pause">暂停</button>' : ''}
         ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume">恢复</button>' : ''}
         ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop">停止</button>' : ''}
@@ -645,6 +646,8 @@ async function renderTask(taskId) {
   $$('[data-task-action]').forEach((button) => {
     button.addEventListener('click', () => taskAction(task.id, button.dataset.taskAction));
   });
+  const baselineButton = $('[data-baseline-submit]');
+  if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -760,6 +763,24 @@ function renderEvent(event) {
     <span class="log-type">${esc(event.type)}</span>
     <span class="log-payload">${esc(JSON.stringify(event.payload || {}).slice(0, 800))}</span>
   </div>`;
+}
+
+async function baselineSubmit(taskId) {
+  const ok = confirm(
+    '这会用题目模板的可编辑文件创建一份快照，并通过调度器向 CANNJudge 真实提交一次（消耗一次提交额度，不需要模型）。\n\n确认提交基线？'
+  );
+  if (!ok) return;
+  try {
+    await api(`/api/tasks/${encodeURIComponent(taskId)}/baseline-submit`, {
+      method: 'POST',
+      body: { confirm: true },
+    });
+    toast('人工基线已排队；worker 将在限频允许时发送', 'success');
+    await renderTask(taskId);
+  } catch (err) {
+    toast(err.message || '基线提交失败', 'error');
+    if (!err.handled) await renderTask(taskId).catch(() => {});
+  }
 }
 
 async function taskAction(taskId, action) {

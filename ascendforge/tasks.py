@@ -66,6 +66,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "agent_max_steps": 10,
     "max_local_seconds": 30,
     "prompt_version": "v1",
+    "manual_only": False,
 }
 
 
@@ -118,6 +119,7 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
     if config["metric"] == "time" and not config.get("time_unit"):
         raise TaskError("BAD_CONFIG", "使用 time 指标时必须明确 time_unit（平台时间单位未被假定）")
     config["prompt_version"] = str(config.get("prompt_version") or "v1")[:32]
+    config["manual_only"] = bool(config.get("manual_only", False))
     return config
 
 
@@ -143,6 +145,13 @@ class TaskService:
         for key in ("problem_json", "template_json", "config_json", "best_metric_json", "local_best_json"):
             if task.get(key):
                 task[key] = json_loads(task[key], task[key])
+        # Convenience aliases used by services that receive the decoded task.
+        if "problem_json" in task:
+            task["problem"] = task["problem_json"]
+        if "template_json" in task:
+            task["template"] = task["template_json"]
+        if "config_json" in task:
+            task["config"] = task["config_json"]
         return task
 
     def _summary(self, task: dict) -> dict:

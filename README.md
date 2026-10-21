@@ -7,9 +7,10 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > **当前验证状态（2026-10-21）**
 >
 > - CANNJudge 的公开题目解析、模板读取、ZIP 工程下载已在本机**真实联网验证**。
-> - 登录、真实提交、结果查询的接口存在性已验证，但**尚未用真实账号完成一次线上提交**；界面和文档明确标注 `documented_not_live_verified`。
+> - **真实登录与题目权限已由用户在 Web 上完成验证**（账号已连接，Cookie 加密保存，未保存密码）；**真实提交/结果尚未完成**，界面和文档明确标注 `documented_endpoint_verified_not_submitted`。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
-> - 55 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 56 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
 
@@ -123,7 +124,7 @@ ascendforge/
     capabilities.py      NPU/CANN/Docker 诚实检测
   backup.py, cli.py, db.py, states.py
 skills/                  三个显式加载的 SKILL.md
-tests/                   55 个 unittest
+tests/                   56 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 ```

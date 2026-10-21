@@ -198,6 +198,18 @@ class WebTests(unittest.TestCase):
         status, payload = self.client.request("GET", f"/api/tasks/{task['id']}")
         self.assertEqual(status, 200)
 
+        status, payload = self.client.request(
+            "POST",
+            f"/api/tasks/{task['id']}/baseline-submit",
+            {"confirm": True},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        attempts = payload["task"]["attempts"]
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["provider"], "manual")
+        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
+
     def _download(self, path):
         request = urllib.request.Request(
             self.base + path,

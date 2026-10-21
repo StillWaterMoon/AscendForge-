@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **55 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **56 passed**
 
 状态含义：
 
@@ -14,8 +14,9 @@
 
 | 验收项 | 状态 | 证据 / 说明 |
 |---|---|---|
-| 登录使用已有真实账号，会话失效可恢复 | IMPLEMENTED, LIVE UNVERIFIED | Web 平台连接页支持账号密码 + 可选验证码；401 → `needs_login`；未真实登录 |
-| 至少一次真实提交绑定源码快照、哈希、远端 ID | IMPLEMENTED, LIVE UNVERIFIED | 快照/哈希/提交载荷单测；真实提交待账号 |
+| 登录使用已有真实账号，会话失效可恢复 | **LIVE VERIFIED (登录/题目权限)** | 用户已在 Web 连接账号；服务器保存加密 Cookie + user_id，题目解析/模板读取成功（`verified_at` 存在）；密码未落库。401 恢复路径仍待真实验证 |
+| 至少一次真实提交绑定源码快照、哈希、远端 ID | IMPLEMENTED, LIVE PENDING | 快照/哈希/提交载荷单测；新增“手动基线提交”（不需要模型），待用户确认后执行 |
+| 无模型时的真实提交流程 | PASS (unit) / LIVE PENDING | `test_baseline`：模板快照 → 排队 → 发送 → 结果 → `manual_baseline_finished`；真实发送待执行 |
 | 真实评测结果可查询、保存、展示 | IMPLEMENTED, LIVE UNVERIFIED | 查询端点存在性已验证；真实 submission id 待提交 |
 | Agent 可由用户 API 驱动，工具由宿主管理 | IMPLEMENTED, MOCK TESTED | MockProvider 两轮闭环；OpenAI 兼容 Provider 未用真实 key 测 |
 | 自动迭代至少两轮，保留父子关系和全部结果 | PASS (mock/HTTP) | `test_runtime_loop`：v1→10、v2→12、v3 失败；父子/best 正确 |

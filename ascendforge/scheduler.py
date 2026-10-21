@@ -760,6 +760,13 @@ class Scheduler:
         config = json_loads(task["config_json"], {})
         report = self.budget_report(dict(task))
         reason = None
+        if config.get("manual_only") and int(
+            self.db.scalar(
+                "SELECT COUNT(*) FROM submissions WHERE task_id=? AND state='finished'", (task_id,)
+            )
+            or 0
+        ) >= 1:
+            reason = "manual_baseline_finished"
         target = config.get("target_score")
         best = json_loads(task.get("best_metric_json"), None)
         if target is not None and best and isinstance(best.get("metric"), dict):

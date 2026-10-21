@@ -35,6 +35,7 @@ from .agent.protocol import TOOLS
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
 from .backup import BackupError, create_backup, list_backups, verify_backup
+from .baseline import create_baseline_submission
 from .config import Settings
 from .db import Database
 from .execution.capabilities import detect_capabilities
@@ -222,6 +223,7 @@ class App:
             ("POST", r"^/api/tasks$", "h_tasks_create", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
@@ -738,6 +740,30 @@ class Handler(BaseHTTPRequestHandler):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         return 200, {"task": detail}
+
+    def h_baseline_submit(self, task_id: str, session: dict | None = None, **_):
+        body = self._read_json()
+        if body.get("confirm") is not True:
+            raise ApiError(400, "CONFIRM_REQUIRED", "真实提交前必须显式确认 confirm=true")
+        result = create_baseline_submission(
+            self.app.db,
+            self.app.settings,
+            self.app.tasks,
+            self.app.scheduler,
+            task_id,
+            actor=(session or {}).get("username", "user"),
+        )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                (session or {}).get("username"),
+                "baseline_submit",
+                task_id,
+                json_dumps({"submission_id": result["submission"]["id"], "snapshot_id": result["snapshot"]["id"]}),
+                now(),
+            ),
+        )
+        return self.h_task_detail(task_id)
 
     def h_task_events(self, task_id: str, **_: Any):
         after = int((self.query.get("after") or ["0"])[0])
