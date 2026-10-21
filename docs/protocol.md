@@ -50,7 +50,7 @@
 
 参数：`{"attempt_id": "att-..."}`；省略时读取当前 attempt 的父版本（没有父版本时读取 best）。
 
-返回该 attempt 的不可变快照、完整文件内容、SHA-256 和 hypothesis。用于在父代码上做最小修改，而不是从模板重写。
+返回该 attempt 的不可变快照、完整文件内容、SHA-256、hypothesis、完整 normalized 结果和原始 result_json。用于在父代码上做最小修改，而不是从模板重写。
 
 ### `create_candidate`
 

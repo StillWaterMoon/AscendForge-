@@ -41,11 +41,29 @@ class ParentContextTests(unittest.TestCase):
         env = make_env(tmp)
         task = seed_task(env, status="running")
         parent = seed_attempt(env, task, source="// unique parent implementation\n")
+        normalized = {
+            "outcome": "failed",
+            "raw_status": "Wrong Answer",
+            "testcase_passed": 1,
+            "testcase_total": 2,
+            "precision_ratio": 0.25,
+            "testcases": [
+                {"index": 0, "status": "Pass", "passed": True, "precision_ratio": 1, "raw": {"best_time": 1.2}},
+                {"index": 1, "status": "Wrong Answer", "passed": False, "precision_ratio": 0.25, "raw": {"best_time": 1.3}},
+            ],
+        }
+        env.db.execute(
+            "UPDATE attempts SET normalized_json=?, result_json=? WHERE id=?",
+            (json.dumps(normalized), json.dumps({"status": "Wrong Answer", "result": [{"precision_ratio": 0.25}]}), parent["id"]),
+        )
         child = seed_attempt(env, task, parent=parent["id"], source="// child implementation\n")
         messages = env.runtime._build_messages(env.tasks.get(task["id"]), child, "system")
         context = messages[1]["content"]
         self.assertIn("## Parent candidate source", context)
         self.assertIn("unique parent implementation", context)
+        self.assertIn("## Parent evaluation result (full", context)
+        self.assertIn("full_raw_json", context)
+        self.assertIn("precision_ratio=0.25", context)
         self.assertIn("minimal diff", context)
 
 

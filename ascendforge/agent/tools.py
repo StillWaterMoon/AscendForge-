@@ -331,6 +331,8 @@ class ToolExecutor:
             "ordinal": target.get("ordinal"),
             "parent_attempt_id": target.get("parent_attempt_id"),
             "hypothesis": target.get("hypothesis"),
+            "result": json_loads(target.get("normalized_json"), None),
+            "raw_result": json_loads(target.get("result_json"), None),
             "snapshot": {
                 "id": target["snapshot_id"],
                 "sha256": bundle["snapshot"]["sha256"],

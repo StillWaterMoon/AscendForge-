@@ -55,8 +55,8 @@ from .tools import ToolExecutor
 log = logging.getLogger(__name__)
 
 SKILLS_FOR_OPTIMIZATION = ["optimize-operator", "optimize-ascend-operator", "generate-operator-tests"]
-MAX_CONTEXT_CHARS = 120_000
-MAX_STORED_MESSAGE_CHARS = 20_000
+MAX_CONTEXT_CHARS = 500_000
+MAX_STORED_MESSAGE_CHARS = 500_000
 
 
 class RuntimeUnavailable(RuntimeError):
@@ -403,7 +403,7 @@ class AgentRuntime:
         return messages
 
     @staticmethod
-    def _clip_result_text(value: Any, limit: int = 12_000) -> str:
+    def _clip_result_text(value: Any, limit: int = 120_000) -> str:
         text = json_dumps(value)
         if len(text) > limit:
             text = text[:limit] + "\n...[tool result truncated]..."
@@ -435,6 +435,8 @@ class AgentRuntime:
                         best_files = None
             parent_files = None
             parent_attempt = None
+            parent_result = None
+            parent_raw = None
             parent_id = attempt.get("parent_attempt_id") or task.get("best_attempt_id")
             if parent_id:
                 candidate_parent = get_attempt(self.db, parent_id)
@@ -444,9 +446,13 @@ class AgentRuntime:
                             self.db, self.settings, candidate_parent["snapshot_id"]
                         )["files"]
                         parent_attempt = candidate_parent
+                        parent_result = json_loads(candidate_parent.get("normalized_json"), None)
+                        parent_raw = json_loads(candidate_parent.get("result_json"), None)
                     except SnapshotError:
                         parent_files = None
                         parent_attempt = None
+                        parent_result = None
+                        parent_raw = None
             normalized_attempts = []
             for item in attempt_history(self.db, task["id"], limit=20):
                 normalized_attempts.append(
@@ -462,6 +468,8 @@ class AgentRuntime:
                 best_files=best_files,
                 parent_files=parent_files,
                 parent_attempt=parent_attempt,
+                parent_result=parent_result,
+                parent_raw=parent_raw,
                 capabilities={
                     "npu": capabilities.get("npu"),
                     "candidate_execution": capabilities.get("candidate_execution"),
@@ -486,7 +494,7 @@ class AgentRuntime:
         trimmed = [system]
         if first_user:
             trimmed.append(
-                {"role": "user", "content": truncate_text(first_user["content"], 60_000)}
+                {"role": "user", "content": truncate_text(first_user["content"], 450_000)}
             )
         for item in tails:
             if first_user and item is first_user:

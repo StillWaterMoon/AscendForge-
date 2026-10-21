@@ -16,6 +16,8 @@ from ..util import json_dumps, truncate_text
 MAX_PROBLEM_CHARS = 24_000
 MAX_TEMPLATE_CHARS = 48_000
 MAX_HISTORY_CHARS = 16_000
+MAX_PARENT_SOURCE_CHARS = 200_000
+MAX_PARENT_RESULT_CHARS = 120_000
 
 
 def system_prompt(skill_block: str) -> str:
@@ -181,6 +183,45 @@ def _testcase_digest(attempts: list[dict]) -> str:
     return "(no per-testcase remote feedback yet)"
 
 
+def _parent_result_text(
+    parent_attempt: dict | None,
+    parent_result: dict | None,
+    parent_raw: dict | None,
+) -> str:
+    if not parent_attempt:
+        return "(no parent attempt)"
+    ordinal = parent_attempt.get("ordinal")
+    if not parent_result and not parent_raw:
+        return (
+            f"attempt #{ordinal} has no final remote result yet; "
+            "use its hypothesis and source, and do not invent testcase data."
+        )
+    normalized = parent_result or {}
+    lines = [
+        f"attempt #{ordinal} full remote evaluation",
+        f"status={normalized.get('raw_status') or normalized.get('outcome') or 'unknown'}",
+        f"passed={normalized.get('testcase_passed')}/{normalized.get('testcase_total')} "
+        f"score={normalized.get('score')} precision_ratio(min)={normalized.get('precision_ratio')}",
+    ]
+    if normalized.get("message"):
+        lines.append("message: " + str(normalized["message"]))
+    cases = normalized.get("testcases") or []
+    for case in cases:
+        raw = case.get("raw") if isinstance(case.get("raw"), dict) else {}
+        lines.append(
+            f"#{int(case.get('index', 0)) + 1} "
+            f"status={case.get('status')} passed={case.get('passed')} "
+            f"precision_ratio={case.get('precision_ratio')} "
+            f"time={case.get('time')} best_time={raw.get('best_time')} "
+            f"message={case.get('message')}"
+        )
+    payload = parent_raw if parent_raw is not None else normalized
+    raw_text = json_dumps(payload, pretty=True)
+    lines.append("full_raw_json:")
+    lines.append(truncate_text(raw_text, MAX_PARENT_RESULT_CHARS))
+    return "\n".join(lines)
+
+
 def context_prompt(
     *,
     task: dict,
@@ -189,6 +230,8 @@ def context_prompt(
     best_files: dict[str, str] | None,
     parent_files: dict[str, str] | None = None,
     parent_attempt: dict | None = None,
+    parent_result: dict | None = None,
+    parent_raw: dict | None = None,
     capabilities: dict | None = None,
 ) -> str:
     config = task.get("config") or {}
@@ -224,12 +267,12 @@ def context_prompt(
             header = (
                 f"attempt #{parent_attempt.get('ordinal')} "
                 f"(id {parent_attempt.get('id')}, parent of this attempt)\n"
-                f"hypothesis: {truncate_text(str(parent_attempt.get('hypothesis') or ''), 2000)}\n\n"
+                f"hypothesis: {parent_attempt.get('hypothesis') or ''}\n\n"
             )
         for path, content in sorted(parent_files.items()):
             piece = f"### {path}\n{content}\n"
-            if used + len(piece) > 30_000:
-                chunks.append("... parent source truncated ...")
+            if used + len(piece) > MAX_PARENT_SOURCE_CHARS:
+                chunks.append("... parent source exceeds the host context cap ...")
                 break
             chunks.append(piece)
             used += len(piece)
@@ -264,6 +307,9 @@ code_template: {problem.get('code_template')}
 
 ## Parent candidate source (start from this; minimal diff)
 {parent_text}
+
+## Parent evaluation result (full; use this with the parent source)
+{_parent_result_text(parent_attempt, parent_result, parent_raw)}
 
 ## Problem-specific strategy (from the task owner)
 {strategy_text}

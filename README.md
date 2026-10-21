@@ -137,6 +137,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 测试生成：`skills/generate-operator-tests/SKILL.md`
 - 题目目标/约束：任务配置里的 `strategy_prompt`，可在新建任务或任务详情“题目策略”中填写
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
+- 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值
 - 远端反馈：上下文自动包含最近一次逐测试点 `precision_ratio`/耗时；历史工具也返回 `testcase_precision`，不只给聚合最小值
 
 ```
