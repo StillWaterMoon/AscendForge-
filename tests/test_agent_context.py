@@ -49,6 +49,35 @@ class ParentContextTests(unittest.TestCase):
         self.assertIn("minimal diff", context)
 
 
+class TestcaseDigestTests(unittest.TestCase):
+    def test_per_testcase_precision_is_injected(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-testcase-digest-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        attempt = seed_attempt(env, task)
+        normalized = {
+            "outcome": "failed",
+            "raw_status": "Wrong Answer",
+            "testcase_passed": 0,
+            "testcase_total": 2,
+            "precision_ratio": 0.25,
+            "testcases": [
+                {"index": 0, "status": "Wrong Answer", "precision_ratio": 0.4807, "time": 10.17, "raw": {"best_time": 1.49}},
+                {"index": 1, "status": "Wrong Answer", "precision_ratio": 0.25, "time": 18.34, "raw": {"best_time": 1.46}},
+            ],
+        }
+        env.db.execute(
+            "UPDATE attempts SET normalized_json=? WHERE id=?",
+            (json.dumps(normalized), attempt["id"]),
+        )
+        messages = env.runtime._build_messages(env.tasks.get(task["id"]), attempt, "system")
+        context = messages[1]["content"]
+        self.assertIn("## Latest remote feedback (per testcase)", context)
+        self.assertIn("per-testcase:", context)
+        self.assertIn("0.4807", context)
+        self.assertIn("precision_ratio is a platform field", context)
+
+
 class StrategyConfigTests(unittest.TestCase):
     def test_strategy_prompt_is_validated_and_kept(self):
         from ascendforge.tasks import TaskError, normalize_config

@@ -44,7 +44,7 @@
 
 参数：`{"limit": 20}`
 
-返回最近 attempts（状态、父版本、快照摘要、结果、提交状态、本地校验）和 best。只返回摘要，不返回源码。
+返回最近 attempts（状态、父版本、快照摘要、结果、提交状态、本地校验）、逐测试点 `testcase_precision`（index/status/precision_ratio/time/best_time/message）和 best。只返回摘要，不返回源码。
 
 ### `read_attempt_source`
 

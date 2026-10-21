@@ -130,6 +130,57 @@ def _history(attempts: list[dict], *, current_id: str | None) -> str:
     return truncate_text(text, MAX_HISTORY_CHARS)
 
 
+def _testcase_digest(attempts: list[dict]) -> str:
+    """Render per-testcase feedback, not just the aggregate minimum.
+
+    CANNJudge exposes ``precision_ratio`` per testcase and often no expected
+    value.  Repeated ratios across dtype groups are a useful signal, so the
+    Agent should see them directly instead of having to guess from one number.
+    """
+    for item in attempts:
+        normalized = item.get("normalized") or {}
+        cases = normalized.get("testcases") or []
+        if not cases:
+            continue
+        ordinal = item.get("ordinal")
+        status = normalized.get("raw_status") or normalized.get("outcome") or "unknown"
+        passed = normalized.get("testcase_passed")
+        total = normalized.get("testcase_total")
+        score = normalized.get("score")
+        precision = normalized.get("precision_ratio")
+        lines = [
+            f"attempt #{ordinal} — {status}; passed={passed}/{total}; score={score}; "
+            f"precision_ratio(min across cases)={precision}",
+        ]
+        shown = cases[:30]
+        ratios = []
+        for case in shown:
+            index = int(case.get("index", 0)) + 1
+            ratio = case.get("precision_ratio")
+            time_value = case.get("time")
+            raw = case.get("raw") if isinstance(case.get("raw"), dict) else {}
+            best_time = raw.get("best_time")
+            ratios.append(
+                f"#{index} status={case.get('status')} precision={ratio} "
+                f"time={time_value} best_time={best_time}"
+            )
+        lines.append("per-testcase: " + " | ".join(ratios))
+        messages = [
+            str(case.get("message"))
+            for case in shown
+            if case.get("message")
+        ]
+        if messages:
+            lines.append("testcase message: " + messages[0][:1000])
+        lines.append(
+            "Note: precision_ratio is a platform field, not a confirmed error fraction. "
+            "Compare testcases by dtype/shape; repeated ratios across a fixed group "
+            "may indicate element-width, stride, tail or per-dtype coverage bugs."
+        )
+        return "\n".join(lines)
+    return "(no per-testcase remote feedback yet)"
+
+
 def context_prompt(
     *,
     task: dict,
@@ -207,6 +258,9 @@ code_template: {problem.get('code_template')}
 
 ## Experiment history (newest first)
 {_history(attempts, current_id=attempt.get('id'))}
+
+## Latest remote feedback (per testcase)
+{_testcase_digest(attempts)}
 
 ## Parent candidate source (start from this; minimal diff)
 {parent_text}

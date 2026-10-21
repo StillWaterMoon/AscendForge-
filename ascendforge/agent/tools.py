@@ -275,6 +275,17 @@ class ToolExecutor:
                     "testcase_total": normalized.get("testcase_total"),
                     "score": normalized.get("score"),
                     "precision_ratio": normalized.get("precision_ratio"),
+                    "testcase_precision": [
+                        {
+                            "index": case.get("index"),
+                            "status": case.get("status"),
+                            "precision_ratio": case.get("precision_ratio"),
+                            "time": case.get("time"),
+                            "best_time": (case.get("raw") or {}).get("best_time"),
+                            "message": case.get("message"),
+                        }
+                        for case in (normalized.get("testcases") or [])
+                    ],
                     "message": normalized.get("message") or item.get("error_message"),
                     "error_code": item.get("error_code"),
                     "local_validation": json_loads(item.get("local_validation_json"), None),
