@@ -10,7 +10,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - **真实登录、题目导入、一次真实提交、远端 ID、结果查询与独立读回已完成**（2026-10-21，CopySign，remote id `6ad84d04193e507d8e4a0502`）。提交的是模板基线，平台返回 `Runtime Error`（15/15），**不代表算子通过**。
 > - 提交字节与快照逐字节一致：snapshot `3aa9af10...b377b95`，`kernel.asc` SHA-256 `022d2dd0...f8641f`，远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
-> - 56 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 64 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
@@ -125,7 +125,7 @@ ascendforge/
     capabilities.py      NPU/CANN/Docker 诚实检测
   backup.py, cli.py, db.py, states.py
 skills/                  三个显式加载的 SKILL.md
-tests/                   56 个 unittest
+tests/                   64 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 ```
@@ -179,7 +179,7 @@ $ASCENDFORGE_DATA_DIR/
 PYTHONPATH=. python -m unittest discover -s tests -t . -v
 ```
 
-覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、两轮 mock 优化与失败不覆盖 best、CSRF/幂等、凭据掩码、档案排除密钥、备份校验/恢复、隔离执行器超时/输出上限/环境清洗、CANNJudge 提交载荷校验、生成器/参考实现隔离执行、任务状态机与 skills 加载。
+覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、两轮 mock 优化与失败不覆盖 best、CSRF/幂等、凭据掩码、档案排除密钥、备份校验/恢复、隔离执行器超时/输出上限/环境清洗、CANNJudge 提交载荷校验、生成器/参考实现隔离执行、任务状态机与 skills 加载、真实 HTTP OpenAI 兼容 Provider（JSON 动作、原生 tool_calls、tools 降级）、提交 401/403/429/unknown 异常分支、手动基线与继续自动优化。
 
 ## 尚未验证 / 需要你完成
 

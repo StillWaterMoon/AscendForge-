@@ -210,6 +210,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual(attempts[0]["provider"], "manual")
         self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
 
+        # Simulate the baseline finishing, then continue the same task with the
+        # Agent so it retains the baseline history.
+        self.env.db.execute(
+            "UPDATE tasks SET status='completed', stop_reason='manual_baseline_finished' WHERE id=?",
+            (task["id"],),
+        )
+        self.env.db.execute("UPDATE attempts SET status='finished' WHERE id=?", (attempts[0]["id"],))
+        status, payload = self.client.request(
+            "POST",
+            f"/api/tasks/{task['id']}/continue-optimization",
+            {},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["status"], "running")
+        self.assertFalse(payload["task"]["config"]["manual_only"])
+
     def _download(self, path):
         request = urllib.request.Request(
             self.base + path,

@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **56 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **64 passed**
 
 状态含义：
 
@@ -18,7 +18,8 @@
 | 至少一次真实提交绑定源码快照、哈希、远端 ID | **PASS (LIVE, 2026-10-21)** | CopySign 基线：snapshot `3aa9af10...b377b95`，request_hash 一致，remote id `6ad84d04193e507d8e4a0502`；平台回显 `kernel.asc` SHA-256 一致 |
 | 无模型时的真实提交流程 | **PASS (LIVE)** | 任务详情“提交基线（手动）”→ 真实提交 → `manual_baseline_finished`；不需要模型 |
 | 真实评测结果可查询、保存、展示 | **PASS (LIVE)** | 平台返回 `Runtime Error`，15/15 测试点；原始响应保存，独立 `GET /api/submissions/{id}?userId=...` 读回一致 |
-| Agent 可由用户 API 驱动，工具由宿主管理 | IMPLEMENTED, MOCK TESTED | MockProvider 两轮闭环；OpenAI 兼容 Provider 未用真实 key 测 |
+| Agent 可由用户 API 驱动，工具由宿主管理 | **PASS (HTTP mock provider)** | `test_provider_http`：真实 HTTP 请求 OpenAI 兼容端点，验证 JSON 动作、原生 tool_calls、tools 400 降级、Runtime 创建快照并入队；真实模型 key 仍未测 |
+| 提交异常分支（401/403/429/unknown） | **PASS (unit)** | `test_submission_errors`：401→needs_login、403→needs_review、429 退避且计入额度、unknown→冻结 |
 | 自动迭代至少两轮，保留父子关系和全部结果 | PASS (mock/HTTP) | `test_runtime_loop`：v1→10、v2→12、v3 失败；父子/best 正确 |
 | 同账号跨任务限频，重启后仍生效 | PASS (unit) | `test_claim_send_and_interval_persist_across_restart`、`test_interval_is_global_across_tasks` |
 | 响应丢失不盲目重复，支持对账/人工恢复 | PASS (unit) | unknown 冻结、唯一 adopt、歧义 needs_review、mark_failed |
