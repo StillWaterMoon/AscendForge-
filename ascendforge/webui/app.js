@@ -417,29 +417,62 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><div><h2>全部任务</h2><div class="card-sub">点击任务查看代码、反馈和调度状态</div></div></div>
+    <div class="card task-board">
+      <div class="card-head"><div><h2>全部任务</h2><div class="card-sub">点击任务查看代码、反馈和调度状态</div></div><div class="faint small">${esc(tasks.length)} 个任务</div></div>
       ${tasks.length ? `
-      <div class="table-wrap"><table>
-        <thead><tr><th>任务</th><th>状态</th><th>题目</th><th>最好成绩</th><th>下一次提交</th><th>提交</th><th>更新时间</th></tr></thead>
-        <tbody>
-          ${tasks.map((task) => `
-            <tr class="clickable" data-task-open="${esc(task.id)}">
-              <td><strong>${esc(task.title)}</strong><div class="faint mono small">${esc(task.id)}</div></td>
-              <td>${taskBadge(task.status)}</td>
-              <td>${esc(task.problem_title || '—')}</td>
-              <td>${renderBest(task.best_metric)}</td>
-              <td>${task.quota?.next_submit_at ? esc(fmtTime(task.quota.next_submit_at)) : '—'}</td>
-              <td>${esc(task.quota ? task.quota.sends_total : '—')} / ${esc(task.quota?.max_submissions_per_task || '—')}</td>
-              <td class="muted small">${esc(fmtTime(task.updated_at))}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>` : `<div class="empty">还没有任务。先连接 CANNJudge 与模型，再新建一个题目任务。</div>`}
+      <div class="task-grid">
+        ${tasks.map((task) => {
+          const quota = task.quota || {};
+          const next = quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待调度';
+          const sends = quota.sends_total ?? 0;
+          const maxSends = quota.max_submissions_per_task ?? '—';
+          const error = task.last_error ? String(task.last_error).slice(0, 110) : '';
+          return `<article class="task-card status-${esc(task.status)}" data-task-open="${esc(task.id)}" tabindex="0">
+            <div class="task-card-top">
+              <div>${taskBadge(task.status)}</div>
+              <span class="task-card-id mono" title="${esc(task.id)}">${esc(String(task.id).slice(0, 14))}…</span>
+            </div>
+            <h3 class="task-card-title">${esc(task.title)}</h3>
+            <div class="task-card-problem">${esc(task.problem_title || '未命名题目')} <span class="mono">${esc(task.problem_id || '')}</span></div>
+            <div class="task-card-metrics">
+              <div><span class="task-k">最好成绩</span><div class="task-v">${renderBestCompact(task.best_metric)}</div></div>
+              <div><span class="task-k">提交</span><div class="task-v mono">${esc(sends)}<span class="faint"> / ${esc(maxSends)}</span></div></div>
+              <div><span class="task-k">下一次</span><div class="task-v small">${esc(next)}</div></div>
+            </div>
+            <div class="task-card-foot">
+              <span class="task-error">${esc(error || taskFootNote(task))}</span>
+              <span class="faint mono">${esc(fmtTime(task.updated_at))}</span>
+            </div>
+          </article>`;
+        }).join('')}
+      </div>` : `<div class="empty">还没有任务。先连接 CANNJudge 与模型，再新建一个题目任务。</div>`}
     </div>`;
 
   $('#new-task').addEventListener('click', () => openNewTaskModal().catch((e) => toast(e.message || '打开表单失败', 'error')));
   $('#refresh-dashboard').addEventListener('click', () => renderDashboard().catch((e) => toast(e.message, 'error')));
-  $$('[data-task-open]').forEach((row) => row.addEventListener('click', () => navigate(`#/tasks/${row.dataset.taskOpen}`)));
+  $$('[data-task-open]').forEach((row) => {
+    row.addEventListener('click', () => navigate(`#/tasks/${row.dataset.taskOpen}`));
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        navigate(`#/tasks/${row.dataset.taskOpen}`);
+      }
+    });
+  });
+}
+
+function taskFootNote(task) {
+  if (task.stop_reason) return `停止原因：${task.stop_reason}`;
+  return TASK_STATUS[task.status] || task.status || '—';
+}
+
+function renderBestCompact(best) {
+  if (!best) return '<span class="faint">—</span>';
+  if (best.metric && typeof best.metric === 'object') {
+    return `<span class="mono">${esc(best.metric.value ?? '—')}</span><div class="faint tiny">${esc(best.metric.metric || 'metric')}</div>`;
+  }
+  if (best.raw_status) return `<span class="mono">${esc(best.raw_status)}</span>`;
+  return '<span class="faint">—</span>';
 }
 
 function renderBest(best) {
@@ -901,6 +934,7 @@ function renderAttemptModal() {
     </div>
     <div class="tabs" id="attempt-tabs">
       ${attemptTab('source', '源码')}
+      ${attemptTab('testcases', '测试点')}
       ${attemptTab('result', '远端结果')}
       ${attemptTab('diff-parent', '对比父版本')}
       ${attemptTab('diff-best', '对比 best')}
@@ -920,6 +954,31 @@ function attemptTab(key, label) {
 }
 
 function renderAttemptBody(data, file, selected) {
+  if (state.attemptTab === 'testcases') {
+    const normalized = data.attempt.normalized_json || {};
+    const cases = normalized.testcases || [];
+    if (!cases.length) return '<div class="empty">该 attempt 还没有逐测试点结果。</div>';
+    return `<div class="case-summary">
+      <div><span class="task-k">结果</span><strong>${esc(normalized.raw_status || normalized.outcome || '—')}</strong></div>
+      <div><span class="task-k">通过</span><strong>${esc(normalized.testcase_passed ?? '—')} / ${esc(normalized.testcase_total ?? '—')}</strong></div>
+      <div><span class="task-k">聚合 precision</span><strong class="mono">${esc(normalized.precision_ratio ?? '—')}</strong></div>
+    </div>
+    <div class="case-list">
+      ${cases.map((item) => {
+        const p = Number(item.precision_ratio);
+        const width = Number.isFinite(p) ? Math.max(0, Math.min(100, p * 100)) : 0;
+        const raw = item.raw || {};
+        return `<div class="case-row">
+          <div class="case-index mono">#${esc((item.index ?? 0) + 1)}</div>
+          <div class="case-main">
+            <div class="row-between"><span>${item.passed ? badge('Pass', 'pass') : badge(item.status || '失败', 'fail')}</span><span class="mono small">${Number.isFinite(p) ? (p * 100).toFixed(2) + '%' : '—'}</span></div>
+            <div class="case-bar"><i style="width:${width}%"></i></div>
+            <div class="case-meta"><span>time <b class="mono">${esc(item.time ?? '—')}</b></span><span>best <b class="mono">${esc(raw.best_time ?? '—')}</b></span>${item.message ? `<span class="wrap">${esc(item.message)}</span>` : ''}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
   if (state.attemptTab === 'result') {
     return `<div class="code-shell"><div class="code-head"><span class="path">normalized + raw</span></div><div class="code-body"><pre>${esc(jsonPretty({ normalized: data.attempt.normalized_json, raw: data.submission?.response_json || data.attempt.result_json || null }))}</pre></div></div>`;
   }
