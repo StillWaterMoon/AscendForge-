@@ -15,9 +15,9 @@
 | 验收项 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 登录使用已有真实账号，会话失效可恢复 | **LIVE VERIFIED (登录/题目权限)** | 用户已在 Web 连接账号；服务器保存加密 Cookie + user_id，题目解析/模板读取成功（`verified_at` 存在）；密码未落库。401 恢复路径仍待真实验证 |
-| 至少一次真实提交绑定源码快照、哈希、远端 ID | IMPLEMENTED, LIVE PENDING | 快照/哈希/提交载荷单测；新增“手动基线提交”（不需要模型），待用户确认后执行 |
-| 无模型时的真实提交流程 | PASS (unit) / LIVE PENDING | `test_baseline`：模板快照 → 排队 → 发送 → 结果 → `manual_baseline_finished`；真实发送待执行 |
-| 真实评测结果可查询、保存、展示 | IMPLEMENTED, LIVE UNVERIFIED | 查询端点存在性已验证；真实 submission id 待提交 |
+| 至少一次真实提交绑定源码快照、哈希、远端 ID | **PASS (LIVE, 2026-10-21)** | CopySign 基线：snapshot `3aa9af10...b377b95`，request_hash 一致，remote id `6ad84d04193e507d8e4a0502`；平台回显 `kernel.asc` SHA-256 一致 |
+| 无模型时的真实提交流程 | **PASS (LIVE)** | 任务详情“提交基线（手动）”→ 真实提交 → `manual_baseline_finished`；不需要模型 |
+| 真实评测结果可查询、保存、展示 | **PASS (LIVE)** | 平台返回 `Runtime Error`，15/15 测试点；原始响应保存，独立 `GET /api/submissions/{id}?userId=...` 读回一致 |
 | Agent 可由用户 API 驱动，工具由宿主管理 | IMPLEMENTED, MOCK TESTED | MockProvider 两轮闭环；OpenAI 兼容 Provider 未用真实 key 测 |
 | 自动迭代至少两轮，保留父子关系和全部结果 | PASS (mock/HTTP) | `test_runtime_loop`：v1→10、v2→12、v3 失败；父子/best 正确 |
 | 同账号跨任务限频，重启后仍生效 | PASS (unit) | `test_claim_send_and_interval_persist_across_restart`、`test_interval_is_global_across_tasks` |
@@ -56,16 +56,19 @@
 
 ## 4. 依赖外部条件、当前无法验收
 
-1. **真实 CANNJudge 登录**：需要用户在 Web 输入账号密码（不要在聊天中发送密码）。
-2. **真实提交**：需要账号对目标题目有提交权限；平台可能要求验证码/二次验证。
-3. **真实结果**：需要一次被受理的 submission id。
-4. **HiDevLab 950**：审批、部署、网络出口、Docker/CANN/NPU 能力。
-5. **模型 API**：base_url/key/model；不同中转站对 tools/JSON/计费字段的兼容性。
+1. **真实 Pass（可通过的算子实现）**：阶段 1 提交的是模板基线，返回 `Runtime Error`；还没有 `Pass`，也没有 best。
+2. **真实模型 Agent 自动优化**：模型 API 尚未配置；需要 base_url/key/model，并完成至少两轮真实迭代。
+3. **HiDevLab 950**：审批、部署、网络出口、Docker/CANN/NPU 能力。
+4. **模型网关兼容性**：不同中转站对 tools/JSON/计费字段的兼容性。
 6. **HTTPS 域名**：反向代理与证书。
 7. **浏览器视觉/交互**：已用 headless Chrome 实际登录演示实例并截图验证登录页、任务面板、任务详情、attempt 源码/diff、平台连接、模型设置；未做跨浏览器/移动端/无障碍回归。
 8. **进程故障演练**：真实服务器上的 kill -9、重启 web/worker、断网、重复请求。
 
-## 5. 建议的阶段 1 验收步骤
+## 5. 阶段 1 实测记录（2026-10-21）
+
+阶段 1 的真实闭环已用 CopySign 模板基线完成：登录/会话 → 导入题目 → 快照 → 调度提交 → remote id → 结果查询 → 原始结果保存 → 独立读回。详细证据见 [stage1-report.md](stage1-report.md) 和 [evidence JSON](evidence/stage1-2026-10-21.json)。基线结果为 `Runtime Error`（0/15），因此下一步是真实实现/Agent 优化，而不是重复验证提交通道。
+
+### 后续复验步骤
 
 1. 在服务器启动 web + worker，浏览器登录 AscendForge。
 2. 平台连接：输入 CANNJudge 账号密码 + Add 题目链接；确认返回账号 masked、题目标题、模板文件数。

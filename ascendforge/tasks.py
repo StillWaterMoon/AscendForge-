@@ -444,7 +444,7 @@ class TaskService:
     def mark_needs_login(self, task_id: str, message: str) -> None:
         self._set_needs_login(task_id, message)
 
-    def mark_needs_review(self, task_id: str, message: str) -> None:
+    def mark_needs_review(self, task_id: str, message: str, code: str = "SUBMISSION_UNKNOWN") -> None:
         task = self.db.query_one("SELECT status FROM tasks WHERE id=?", (task_id,))
         if not task or task["status"] in TASK_TERMINAL:
             return
@@ -454,8 +454,8 @@ class TaskService:
             except Exception:
                 log.exception("failed to set needs_review for %s", task_id)
         self.db.execute(
-            "UPDATE tasks SET last_error_code='SUBMISSION_UNKNOWN', last_error=? WHERE id=?",
-            (message, task_id),
+            "UPDATE tasks SET last_error_code=?, last_error=? WHERE id=?",
+            (code, message, task_id),
         )
 
     def complete(self, task_id: str, reason: str) -> None:

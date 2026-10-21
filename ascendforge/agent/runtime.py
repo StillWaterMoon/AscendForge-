@@ -137,7 +137,9 @@ class AgentRuntime:
         try:
             config = self.model_config()
         except RuntimeUnavailable as exc:
-            self.tasks.mark_needs_review(task_id, f"{exc.message}；请配置模型 API 后恢复任务")
+            self.tasks.mark_needs_review(
+                task_id, f"{exc.message}；请配置模型 API 后恢复任务", code=exc.code
+            )
             return "needs_model"
         attempt = self._select_attempt(task, config)
         if attempt is None:
@@ -307,7 +309,9 @@ class AgentRuntime:
             "SELECT 1 FROM events WHERE task_id=? AND type='skills_missing' LIMIT 1", (task["id"],)
         ):
             add_event(self.db, task["id"], attempt["id"], "skills_missing", {"expected": SKILLS_FOR_OPTIMIZATION})
-            self.tasks.mark_needs_review(task["id"], "缺少必需的 skills 文本，无法按规范运行 Agent")
+            self.tasks.mark_needs_review(
+                task["id"], "缺少必需的 skills 文本，无法按规范运行 Agent", code="SKILLS_MISSING"
+            )
         return False
 
     # ------------------------------------------------------------------
@@ -453,7 +457,9 @@ class AgentRuntime:
         )
         self.tasks.set_last_error(task["id"], exc.code, exc.message[:500])
         if exc.code in ("MODEL_AUTH", "MODEL_FORBIDDEN", "MODEL_NOT_CONFIGURED", "INSECURE_MODEL_URL", "BAD_MODEL_URL"):
-            self.tasks.mark_needs_review(task["id"], f"模型 API 配置/鉴权失败：{exc.message}")
+            self.tasks.mark_needs_review(
+                task["id"], f"模型 API 配置/鉴权失败：{exc.message}", code=exc.code
+            )
         elif exc.retryable:
             self.tasks.set_next_action(task["id"], now() + (30 if exc.code == "MODEL_NETWORK" else 15))
         else:
@@ -506,6 +512,7 @@ class AgentRuntime:
             self.tasks.mark_needs_review(
                 task["id"],
                 "费用上限已设置，但存在未配置单价的模型调用；未知费用不能当作 0。请补充单价或移除 max_cost。",
+                code="COST_UNKNOWN",
             )
         else:
             self.tasks.set_next_action(task["id"], now() + 30)

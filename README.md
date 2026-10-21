@@ -7,7 +7,8 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > **当前验证状态（2026-10-21）**
 >
 > - CANNJudge 的公开题目解析、模板读取、ZIP 工程下载已在本机**真实联网验证**。
-> - **真实登录与题目权限已由用户在 Web 上完成验证**（账号已连接，Cookie 加密保存，未保存密码）；**真实提交/结果尚未完成**，界面和文档明确标注 `documented_endpoint_verified_not_submitted`。
+> - **真实登录、题目导入、一次真实提交、远端 ID、结果查询与独立读回已完成**（2026-10-21，CopySign，remote id `6ad84d04193e507d8e4a0502`）。提交的是模板基线，平台返回 `Runtime Error`（15/15），**不代表算子通过**。
+> - 提交字节与快照逐字节一致：snapshot `3aa9af10...b377b95`，`kernel.asc` SHA-256 `022d2dd0...f8641f`，远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
 > - 56 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
@@ -182,9 +183,9 @@ PYTHONPATH=. python -m unittest discover -s tests -t . -v
 
 ## 尚未验证 / 需要你完成
 
-1. **真实 CANNJudge 登录 + 一次真实提交**：需要你在 Web「平台连接」中输入账号密码（推荐的唯一安全方式），并在任务中授权提交。当前所有真实提交状态都是“未验收”。
-2. **服务器**：HiDevLab 950 审批下来后，部署 `serve` + `worker`，确认 Docker/CANN/NPU 能力；无 NPU 的开发机不能替代。
-3. **模型 Provider**：需要你提供中转站 base_url、key、模型名；不同网关对 `tools` 字段、JSON 输出和计费字段的兼容性需要实测。
+1. **真实可通过的算子实现**：阶段 1 已用模板基线打通“提交—结果”链路，但基线是模板，返回 `Runtime Error`；还需要真实实现并拿到 `Pass`。
+2. **真实模型 Agent 两轮优化**：需要你提供中转站 base_url、key、模型名；不同网关对 `tools` 字段、JSON 输出和计费字段的兼容性需要实测。
+3. **服务器**：HiDevLab 950 审批下来后，部署 `serve` + `worker`，确认 Docker/CANN/NPU 能力；无 NPU 的开发机不能替代。
 4. **HTTPS/域名**：远程访问前配置反向代理与 `ASCENDFORGE_SECURE_COOKIES=true`。
 
 ## 文档
@@ -192,6 +193,8 @@ PYTHONPATH=. python -m unittest discover -s tests -t . -v
 - [架构与状态机](docs/architecture.md)
 - [CANNJudge 能力矩阵与证据](docs/capability-matrix.md)
 - [阶段 0 真实探测报告](docs/phase0-report.md)
+- [阶段 1 真实提交报告](docs/stage1-report.md)
+- [阶段 1 证据 JSON](docs/evidence/stage1-2026-10-21.json)
 - [部署与运维](docs/operations.md)
 - [安全模型](docs/security.md)
 - [验收清单](docs/acceptance.md)

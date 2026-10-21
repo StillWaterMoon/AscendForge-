@@ -1,0 +1,94 @@
+{
+  "schema": "ascendforge-stage1-evidence/1",
+  "recorded_at": "2026-10-21T13:30:00+08:00",
+  "summary": "First real CANNJudge submission from AscendForge: login/session, problem import, immutable snapshot, scheduled submit, remote id, result query, raw result persistence and independent read-back all succeeded. The submitted baseline was the unmodified editable template, so the platform returned Runtime Error; this is a pipeline verification, not a passing operator implementation.",
+  "task": {
+    "id": "task_1a15cec970375a9f2",
+    "title": "CopySign",
+    "problem_id": "6ad45f04193e507d8e54f48d",
+    "problem_name": "copysign",
+    "problem_title": "CopySign",
+    "problem_url": "https://cannjudge.cn/ccpc/ladder_2026_jingzhou/copysign",
+    "contest": "ladder_2026_jingzhou",
+    "code_template": "npu_kernel_dev",
+    "status": "completed",
+    "stop_reason": "manual_baseline_finished",
+    "best_attempt_id": null
+  },
+  "snapshot": {
+    "id": "snap_1a15cecce557c21e9",
+    "sha256": "3aa9af10794b8e0a8fe7f085f2b02039b208b0dee64c15837c87cd618b377b95",
+    "request_hash": "3aa9af10794b8e0a8fe7f085f2b02039b208b0dee64c15837c87cd618b377b95",
+    "request_hash_matches_snapshot": true,
+    "file_count": 1,
+    "total_bytes": 1288,
+    "files": [
+      {
+        "path": "kernel.asc",
+        "bytes": 1288,
+        "sha256": "022d2dd0990f99c2cc76ffb194cdaec52bb841f8f1787190dca23f8f96f8641f"
+      }
+    ]
+  },
+  "submission": {
+    "id": "sub_1a15cecd288284152",
+    "remote_id": "6ad84d04193e507d8e4a0502",
+    "state": "finished",
+    "sent_at": 1792560387.753707,
+    "finished_at": 1792560428.2520783,
+    "platform_echo_kernel_sha256": "022d2dd0990f99c2cc76ffb194cdaec52bb841f8f1787190dca23f8f96f8641f",
+    "platform_echo_matches_snapshot": true,
+    "submitted_file_count": 1,
+    "platform_response_file_count": 8,
+    "platform_response_file_note": "The result payload echoes the full project (template + submitted editable file); only kernel.asc was sent."
+  },
+  "remote_result": {
+    "status": "Runtime Error",
+    "outcome": "runtime_error",
+    "final": true,
+    "testcase_total": 15,
+    "testcase_passed": 0,
+    "precision_ratio": 0,
+    "score": null,
+    "message": null,
+    "sample_testcase": {
+      "testcase_id": "6ad45f04193e507d8e54f492",
+      "testcase_status": "Runtime Error",
+      "precision_ratio": 0,
+      "score": 0,
+      "time": 0,
+      "best_time": 1.49,
+      "msg": "[Evaluation check failed] profiling and API validation: ProfileError: invocation launched no task"
+    },
+    "independent_query": {
+      "method": "GET /api/submissions/{id}?userId=...",
+      "status": "Runtime Error",
+      "result_count": 15,
+      "matches_stored_result": true
+    }
+  },
+  "event_chain": [
+    "task_created",
+    "problem_imported",
+    "attempt_created",
+    "candidate_snapshot",
+    "baseline_created",
+    "task_running",
+    "submission_queued",
+    "submission_sending",
+    "submission_accepted (remote_id=6ad84d04193e507d8e4a0502)",
+    "submission_finished (outcome=runtime_error, 0/15)",
+    "task_completed (manual_baseline_finished)"
+  ],
+  "limitations": [
+    "The baseline was the unmodified editable template; Runtime Error is expected and is not an operator pass.",
+    "No model API was configured; this run exercised the manual baseline path, not Agent-driven optimization.",
+    "No NPU/CANN on the development host; no local Ascend C execution was claimed.",
+    "The platform result contains 15 visible testcases; hidden testcases and scoring details are not inferred.",
+    "No real passing result exists yet; best_attempt_id is null."
+  ],
+  "security": [
+    "No password, cookie, API key or account email is included in this evidence file.",
+    "The CANNJudge session remains encrypted in the server credential store."
+  ]
+}

@@ -24,11 +24,12 @@
 | 工程 ZIP | live-verified | `GET /api/problems/{id}/package` → 200 `application/zip`，16357 bytes；两次下载哈希不同（平台重新打包），本地导入包单独记哈希 |
 | 图形验证码 | live-verified（端点） | `GET /api/users/captcha` → 200，`captchaId` + SVG |
 | 登录端点 | live-verified（存在性） | `POST /api/users/login {}` → 400 `password required`；字段来自公开资料：`account/loginType/password`（email 兼容字段 `email`） |
-| 登录成功 | **live-verified** | 用户于 2026-10-21 在 Web 连接账号（masked `198****2007@163.com`）；服务器保存加密 Cookie + user_id，题目解析/模板读取成功，`verified_at` 存在；密码未保存 |
+| 登录成功 | **live-verified** | 用户于 2026-10-21 在 Web 连接账号（masked `19***@163.com`）；服务器保存加密 Cookie + user_id，题目解析/模板读取成功，`verified_at` 存在；密码未保存 |
 | 提交端点 | live-verified（存在性） | `POST /api/submissions/submit {}` → 400 `userId and problemId required` |
-| 提交成功 / 返回 ID | **unverified** | 登录已通；尚未用真实账号提交；不能声称闭环已验收。可在任务详情使用“提交基线（手动）”验收 |
+| 提交成功 / 返回 ID | **live-verified** | CopySign 模板基线：remote id `6ad84d04193e507d8e4a0502`；快照 SHA 与 request_hash 一致，平台回显 kernel.asc SHA 一致 |
 | 查询单个提交 | live-verified（存在性） | `GET /api/submissions/does-not-exist` → 400 `invalid submission id`；前端使用 `?userId=` |
-| 查询最终结果 | **unverified** | 未取得真实 submission id |
+| 查询最终结果 | **live-verified** | 同一 remote id 返回 `Runtime Error`，15 个测试点；原始响应保存，独立读回一致 |
+| 真实 `Pass` / 有效算子 | **unverified** | 基线是未修改模板，0/15 通过（ProfileError: invocation launched no task）；不声称算子可用 |
 | 账号题目提交列表 | documented（前端验证） | 前端 `me/submissions.js`：`GET /api/submissions/user/{userId}?withCount=1&...`；题目页：`GET /api/submissions/user/{userId}/problem/{problemId}` |
 | 全站提交列表 | documented（前端验证） | `GET /api/submissions/global/list?withCount=1&skip=&limit=&q=` |
 | 旧文档的 latest 端点 | **live-404** | 公开资料写的 `/api/submissions/problem/{id}/latest` 实测 404 `Cannot GET`，不要使用 |

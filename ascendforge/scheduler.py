@@ -453,7 +453,9 @@ class Scheduler:
         if exc.code in ("AUTH_EXPIRED", "AUTH_REQUIRED"):
             self.tasks.mark_needs_login(submission["task_id"], "CANNJudge 登录已失效，提交已暂停")
         elif exc.code == "FORBIDDEN":
-            self.tasks.mark_needs_review(submission["task_id"], "CANNJudge 拒绝提交（权限/题目问题），请检查账号权限")
+            self.tasks.mark_needs_review(
+                submission["task_id"], "CANNJudge 拒绝提交（权限/题目问题），请检查账号权限", code=exc.code
+            )
         elif exc.code == "RATE_LIMITED":
             retry_at = now() + self._retry_after(exc)
             self.tasks.set_next_action(

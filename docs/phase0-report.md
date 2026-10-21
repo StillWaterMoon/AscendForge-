@@ -10,13 +10,13 @@
 | AscendForge 自身闭环 | 已实现并测试（56 个 unittest） |
 | CANNJudge 公开题目/模板/ZIP | **真实联网验证通过** |
 | CANNJudge 登录 | **真实登录已由用户在 Web 完成**（账号已连接，题目权限已验证，密码未保存） |
-| CANNJudge 真实提交/结果 | 端点存在、登录已通；**真实提交/结果待执行**（可用手动基线） |
+| CANNJudge 真实提交/结果 | **已完成（2026-10-21）**：CopySign 模板基线 remote id `6ad84d04193e507d8e4a0502`，返回 `Runtime Error`（0/15）；提交字节/快照一致，结果可独立读回 |
 | NPU / CANN | 开发机不可用；HiDevLab 950 申请审批中 |
 | 数据生成/CPU 参考 | 已实现隔离执行；候选 Ascend C 永远标记 untested（无 NPU） |
 | 自定义远端测试 | 未核实；禁用 |
 | 服务器部署 | 代码与部署文件已准备；未在 HiDevLab 上实际部署 |
 
-**不能声称阶段 1 真实提交闭环已验收。** 目前具备的是“真实公开题目导入 + 完整 mock/HTTP 闭环 + 可部署系统”。
+**阶段 1 的提交通道已验收；但不代表算子通过。** 基线是模板，平台返回 `Runtime Error`；真实 `Pass`、best 和 Agent 自动优化仍未完成。详见 [阶段 1 报告](stage1-report.md)。
 
 ## 2. 实际执行的验证
 
@@ -122,7 +122,7 @@ GET /api/submissions/does-not-exist
 | 阻塞 | 需要的操作 |
 |---|---|
 | 真实 CANNJudge 登录 | **已完成**：账号已在 Web 连接并验证题目权限 |
-| 真实提交与结果 | 用户授权一次提交；在任务详情点击“提交基线（手动）”即可不依赖模型完成 |
+| 真实提交与结果 | **已完成**：CopySign 基线真实提交，remote id + 原始结果 + 独立读回；结果为 Runtime Error，非 Pass |
 | HiDevLab 950 服务器 | 审批通过后部署、确认网络出口、Docker/CANN/NPU |
 | 模型 API | 用户提供 base_url/key/model；需实测网关兼容性 |
 | HTTPS/域名 | 配置反向代理；设置 `ASCENDFORGE_SECURE_COOKIES=true` |
@@ -131,7 +131,7 @@ GET /api/submissions/does-not-exist
 
 ## 6. 下一步（按阶段）
 
-1. **阶段 1**：用户通过 Web 登录 → 导入 Add（或用户指定题）→ 人工提交一份基线 → 保存远端 ID/结果 → 校验提交字节与快照一致。
+1. **阶段 1（已完成）**：Web 登录 → 导入 CopySign → 手动基线提交 → remote id/结果 → 提交字节与快照一致。基线 `Runtime Error`，未通过。
 2. **阶段 2**：在真实账号下验证 429、401、超时、重启；用两个任务验证跨任务间隔。
 3. **阶段 3**：接入用户模型，完成至少两轮真实“生成/修改 → 提交 → 反馈 → 再修改”。
 4. **阶段 4**：在 950 服务器上确认 NPU/CANN；否则保持 untested，只验证生成器/参考。
