@@ -594,6 +594,7 @@ async function renderTask(taskId) {
         ${task.status === 'running' ? '<button class="btn" data-task-action="pause">暂停</button>' : ''}
         ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume">恢复</button>' : ''}
         ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop">停止</button>' : ''}
+        ${task.status === 'completed' && task.stop_reason === 'manual_baseline_finished' && task.model_configured ? '<button class="btn btn-primary" data-continue-opt="1">继续自动优化</button>' : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
@@ -648,6 +649,8 @@ async function renderTask(taskId) {
   });
   const baselineButton = $('[data-baseline-submit]');
   if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
+  const continueButton = $('[data-continue-opt]');
+  if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -779,6 +782,22 @@ async function baselineSubmit(taskId) {
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '基线提交失败', 'error');
+    if (!err.handled) await renderTask(taskId).catch(() => {});
+  }
+}
+
+async function continueOptimization(taskId) {
+  const ok = confirm('将保留本次基线结果和快照，从该任务继续 Agent 自动优化。需要模型已配置。确认继续？');
+  if (!ok) return;
+  try {
+    await api(`/api/tasks/${encodeURIComponent(taskId)}/continue-optimization`, {
+      method: 'POST',
+      body: {},
+    });
+    toast('已恢复任务，Agent 将基于基线反馈创建新版本', 'success');
+    await renderTask(taskId);
+  } catch (err) {
+    toast(err.message || '恢复失败', 'error');
     if (!err.handled) await renderTask(taskId).catch(() => {});
   }
 }

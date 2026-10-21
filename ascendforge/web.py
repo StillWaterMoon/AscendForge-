@@ -41,6 +41,7 @@ from .db import Database
 from .execution.capabilities import detect_capabilities
 from .experiments import (
     SnapshotError,
+    add_event,
     archive_integrity,
     attempt_history,
     build_snapshot_zip,
@@ -224,6 +225,7 @@ class App:
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/continue-optimization$", "h_continue_optimization", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
@@ -697,6 +699,7 @@ class Handler(BaseHTTPRequestHandler):
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()
+        detail["model_configured"] = self.app.credentials.has("model")
         # The UI does not need full template contents; keep a compact summary.
         template = detail.get("template") or {}
         files = template.get("files") if isinstance(template, dict) else []
@@ -762,6 +765,38 @@ class Handler(BaseHTTPRequestHandler):
                 json_dumps({"submission_id": result["submission"]["id"], "snapshot_id": result["snapshot"]["id"]}),
                 now(),
             ),
+        )
+        return self.h_task_detail(task_id)
+
+    def h_continue_optimization(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        if task["status"] != "completed" or task.get("stop_reason") != "manual_baseline_finished":
+            raise ApiError(409, "BAD_STATE", "只有已完成的人工基线任务可以继续自动优化")
+        if not self.app.credentials.has("model"):
+            raise ApiError(409, "MODEL_NOT_CONFIGURED", "请先在“模型与设置”中配置模型 API")
+        config = dict(task.get("config") or {})
+        config.update(
+            {
+                "manual_only": False,
+                "max_attempts": max(20, int(config.get("max_attempts") or 20)),
+                "max_submissions_per_task": max(20, int(config.get("max_submissions_per_task") or 20)),
+            }
+        )
+        self.app.db.execute(
+            "UPDATE tasks SET status='running', stop_reason=NULL, stopped_at=NULL, next_action_at=?, "
+            "config_json=?, updated_at=? WHERE id=?",
+            (now(), json_dumps(config), now(), task_id),
+        )
+        add_event(
+            self.app.db,
+            task_id,
+            None,
+            "continue_optimization",
+            {"actor": (session or {}).get("username", "user"), "previous_reason": "manual_baseline_finished"},
+        )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            ((session or {}).get("username"), "continue_optimization", task_id, "{}", now()),
         )
         return self.h_task_detail(task_id)
 

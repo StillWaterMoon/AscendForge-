@@ -411,13 +411,22 @@ def normalize_result(raw: Any) -> dict:
         ratios = [_as_float(case["precision_ratio"]) for case in testcases]
         ratios = [r for r in ratios if r is not None]
         precision = min(ratios) if ratios else None
+    message = raw.get("msg") or raw.get("message")
+    if not message:
+        # CANNJudge sometimes puts the useful failure reason only on each
+        # testcase (e.g. "ProfileError: invocation launched no task").  Surface
+        # the first one so the Agent and the UI do not lose the feedback.
+        for case in testcases:
+            if case.get("message"):
+                message = case["message"]
+                break
     return {
         "outcome": outcome,
         "final": final,
         "passed": all_passed,
         "all_passed": all_passed,
         "raw_status": status_text or None,
-        "message": raw.get("msg") or raw.get("message"),
+        "message": message,
         "testcases": testcases,
         "testcase_total": total,
         "testcase_passed": passed_count,

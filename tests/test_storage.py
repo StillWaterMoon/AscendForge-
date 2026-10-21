@@ -67,6 +67,17 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(unknown["outcome"], "unknown")
         self.assertTrue(unknown["final"])
 
+        runtime = normalize_result(
+            {
+                "status": "Runtime Error",
+                "result": [
+                    {"testcase_status": "Runtime Error", "msg": "ProfileError: invocation launched no task"}
+                ],
+            }
+        )
+        self.assertEqual(runtime["outcome"], "runtime_error")
+        self.assertIn("ProfileError", runtime["message"])
+
     def test_best_only_replaced_by_comparable_improvement(self):
         task = seed_task(self.env, config={"metric": "score"})
         attempt1 = seed_attempt(self.env, task, source="// v1")
