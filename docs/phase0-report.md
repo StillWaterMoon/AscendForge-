@@ -127,7 +127,7 @@ GET /api/submissions/does-not-exist
 | 模型 API | 用户提供 base_url/key/model；需实测网关兼容性 |
 | HTTPS/域名 | 配置反向代理；设置 `ASCENDFORGE_SECURE_COOKIES=true` |
 | 平台限频规则 | 真实账号下观察；默认 300s/1 在途/20 每日 |
-| 浏览器视觉回归 | 本机 headless Chrome/Edge 被运行环境沙箱拒绝（mojo/crashpad），只完成 HTTP/JS 语法检查 |
+| 浏览器视觉回归 | 已完成首轮：headless Chrome 实际登录演示实例，截图验证登录页、任务面板、任务详情、attempt 源码/diff、平台、设置；未做跨浏览器/移动端 |
 
 ## 6. 下一步（按阶段）
 

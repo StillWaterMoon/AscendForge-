@@ -61,7 +61,7 @@
 4. **HiDevLab 950**：审批、部署、网络出口、Docker/CANN/NPU 能力。
 5. **模型 API**：base_url/key/model；不同中转站对 tools/JSON/计费字段的兼容性。
 6. **HTTPS 域名**：反向代理与证书。
-7. **浏览器视觉/交互**：当前仅 HTTP 层测试；尝试用本机 headless Chrome/Edge 截图被运行环境沙箱拒绝（mojo/crashpad 访问被拒），未完成视觉回归。
+7. **浏览器视觉/交互**：已用 headless Chrome 实际登录演示实例并截图验证登录页、任务面板、任务详情、attempt 源码/diff、平台连接、模型设置；未做跨浏览器/移动端/无障碍回归。
 8. **进程故障演练**：真实服务器上的 kill -9、重启 web/worker、断网、重复请求。
 
 ## 5. 建议的阶段 1 验收步骤

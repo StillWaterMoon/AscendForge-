@@ -286,12 +286,12 @@ class CannjudgeAdapter(PlatformAdapter):
         return {
             "platform": "cannjudge",
             "base_url": self.base_url,
-            "login": {"status": "documented", "methods": ["account_password", "session_cookie"], "captcha": True},
+            "login": {"status": "documented_endpoint_verified", "methods": ["account_password", "session_cookie"], "captcha": True},
             "problem_import": {"status": "live_verified_anonymous", "supports": ["problem_url", "problem_id"]},
             "template": {"status": "live_verified_anonymous"},
             "package_download": {"status": "live_verified_anonymous"},
-            "submit": {"status": "documented_not_live_verified", "modes": ["npu_kernel_dev", "registry"]},
-            "query": {"status": "documented_not_live_verified"},
+            "submit": {"status": "documented_endpoint_verified_not_submitted", "modes": ["npu_kernel_dev", "registry"]},
+            "query": {"status": "documented_endpoint_verified"},
             "rank": {"status": "documented"},
             "custom_tests": {"status": "unknown", "supported": False},
             "evidence": [

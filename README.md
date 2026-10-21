@@ -11,6 +11,16 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
 > - 55 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 
+## 界面预览
+
+本机 headless Chrome 实际截图（演示数据；非真实 CANNJudge 提交）：
+
+![任务面板](docs/screenshots/dashboard.png)
+
+![尝试记录与源码](docs/screenshots/attempt-source.png)
+
+![版本 diff](docs/screenshots/attempt-diff.png)
+
 ## 为什么是这个形态
 
 - **单用户、单服务器**：Python 标准库 + SQLite + 独立 worker，部署简单，故障面小。

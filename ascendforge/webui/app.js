@@ -669,7 +669,7 @@ function renderTaskAlert(task, quota) {
   if (task.status === 'needs_review') {
     return `<div class="alert warn" style="margin-bottom:16px">任务需要人工审查：${esc(task.last_error || '存在未知提交或模型配置问题')}。处理完成后点击“恢复”。</div>`;
   }
-  if (quota.unknown) {
+  if (quota.unknown && !['completed', 'failed', 'stopped'].includes(task.status)) {
     return `<div class="alert error" style="margin-bottom:16px">账号存在 ${esc(quota.unknown)} 个结果未知的提交，所有新提交已冻结。请在“提交与反馈”中先对账或人工确认。</div>`;
   }
   if (task.last_error && task.status === 'running') {
@@ -802,7 +802,7 @@ function renderAttemptModal() {
   const selected = state.attemptFile && source.find((f) => f.path === state.attemptFile) ? state.attemptFile : (source[0]?.path || '');
   state.attemptFile = selected;
   const file = source.find((f) => f.path === selected);
-  openModal(`Attempt #${attempt.ordinal} · ${attempt.status}`, `
+  openModal(`Attempt #${attempt.ordinal} · ${ATTEMPT_STATUS[attempt.status] || attempt.status}`, `
     <div class="row-between" style="margin-bottom:12px">
       <div>${attemptBadge(attempt.status)} ${normalized.outcome ? outcomeBadge(normalized.outcome) : ''}</div>
       <div class="row">
