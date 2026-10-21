@@ -143,6 +143,21 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(reservation.reason, "max_submissions_per_day")
         self.assertIsNotNone(reservation.retry_at)
 
+    def test_stall_counts_only_remote_results(self):
+        task = self._running_task()
+        for _ in range(3):
+            attempt = seed_attempt(self.env, task, source="// infra failure")
+            self.env.db.execute(
+                "UPDATE attempts SET status='failed', error_code='MODEL_REJECTED' WHERE id=?",
+                (attempt["id"],),
+            )
+        result_attempt = seed_attempt(self.env, task, source="// real result")
+        self.env.db.execute(
+            "UPDATE attempts SET status='finished', result_json='{}' WHERE id=?",
+            (result_attempt["id"],),
+        )
+        self.assertEqual(self.env.scheduler._stall_rounds(self.env.tasks.get(task["id"])), 1)
+
     def test_inflight_limit_is_global(self):
         task = self._running_task(max_inflight=1)
         _, submission = self._queue(task)

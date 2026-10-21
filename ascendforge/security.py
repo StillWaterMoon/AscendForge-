@@ -162,6 +162,7 @@ def model_settings_public(payload: dict | None) -> dict:
         "max_tokens": payload.get("max_tokens", 2048),
         "temperature": payload.get("temperature", 0.2),
         "timeout": payload.get("timeout", 120),
+        "reasoning_mode": payload.get("reasoning_mode", "auto"),
         "price_prompt_per_1k": payload.get("price_prompt_per_1k"),
         "price_completion_per_1k": payload.get("price_completion_per_1k"),
         "updated_at": payload.get("updated_at"),

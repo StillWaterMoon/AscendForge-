@@ -196,12 +196,22 @@ class ToolExecutor:
     def _read_problem(self, task: dict, attempt: dict, arguments: dict) -> dict:
         problem, template = self._decode(task)
         include = bool(arguments.get("include_contents", True))
+        include_readonly = bool(arguments.get("include_readonly", True))
         template_files = CannjudgeAdapter._template_files(template)
         files = []
+        content_budget = 32_000
         for item in template_files:
-            entry = {"path": item["path"], "editable": item["editable"], "bytes": len(item["content"].encode())}
-            if include and item["editable"]:
-                entry["content"] = item["content"]
+            data = item["content"].encode("utf-8")
+            entry = {"path": item["path"], "editable": item["editable"], "bytes": len(data)}
+            should_include = include and (
+                item["editable"] or (include_readonly and len(data) <= 8000)
+            )
+            if should_include and content_budget > 0:
+                content = item["content"]
+                if len(content) > content_budget:
+                    content = content[:content_budget] + "\n...[truncated]..."
+                entry["content"] = content
+                content_budget -= len(content)
             files.append(entry)
         return {
             "problem_id": problem.get("_id") or task.get("problem_id"),

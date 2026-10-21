@@ -49,6 +49,7 @@ class ModelConfig:
     max_tokens: int = 2048
     temperature: float = 0.2
     timeout: int = 120
+    reasoning_mode: str = "auto"
     price_prompt_per_1k: float | None = None
     price_completion_per_1k: float | None = None
 
@@ -79,6 +80,7 @@ class ModelConfig:
             max_tokens=max(16, min(32768, int(payload.get("max_tokens") or 2048))),
             temperature=max(0.0, min(2.0, float(payload.get("temperature", 0.2)))),
             timeout=max(10, min(600, int(payload.get("timeout") or 120))),
+            reasoning_mode=str(payload.get("reasoning_mode") or "auto").lower(),
             price_prompt_per_1k=_float_or_none(payload.get("price_prompt_per_1k")),
             price_completion_per_1k=_float_or_none(payload.get("price_completion_per_1k")),
         )
@@ -108,6 +110,7 @@ class ModelConfig:
             "supports_tool_calls": self.supports_tool_calls,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "reasoning_mode": self.reasoning_mode,
             "endpoint": self.endpoint(),
         }
 
@@ -152,6 +155,13 @@ class OpenAICompatibleProvider(BaseProvider):
         if tools and self.config.supports_tool_calls:
             body["tools"] = openai_tool_schemas()
             body["tool_choice"] = "auto"
+        if self.config.reasoning_mode == "disabled":
+            # Some DeepSeek/Qwen-compatible gateways default to a long reasoning
+            # pass that can consume the entire completion budget before emitting
+            # a tool call.  Both fields are accepted by the tested gateway; the
+            # mode is opt-in so other providers are unaffected.
+            body["thinking"] = {"type": "disabled"}
+            body["reasoning_effort"] = "none"
         return body
 
     def complete(self, messages: list[dict], *, tools: bool = True) -> ProviderResponse:
@@ -225,7 +235,15 @@ class OpenAICompatibleProvider(BaseProvider):
         prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         if not content and not tool_calls:
-            raise ProviderError("MODEL_EMPTY", "模型没有返回内容或工具调用", retryable=True)
+            finish = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
+            reasoning = message.get("reasoning_content")
+            raise ProviderError(
+                "MODEL_EMPTY",
+                "模型没有返回内容或工具调用"
+                f"（finish_reason={finish}, message_keys={sorted(message.keys())}, "
+                f"reasoning_chars={len(reasoning) if isinstance(reasoning, str) else 0}）",
+                retryable=True,
+            )
         return ProviderResponse(
             content=content,
             tool_calls=tool_calls,

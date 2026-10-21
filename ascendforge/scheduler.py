@@ -735,11 +735,16 @@ class Scheduler:
     # Stop conditions
     # ------------------------------------------------------------------
     def _stall_rounds(self, task: dict) -> int:
+        # Count only attempts that produced a final remote result.  Model
+        # failures, invalid actions and manual resets are infrastructure noise;
+        # counting them as optimization stalls prematurely stops a task (this
+        # happened during the first real Agent run).
         best_id = task.get("best_attempt_id")
         if not best_id:
             return int(
                 self.db.scalar(
-                    "SELECT COUNT(*) FROM attempts WHERE task_id=? AND status IN ('finished','failed')",
+                    "SELECT COUNT(*) FROM attempts WHERE task_id=? AND status='finished' "
+                    "AND result_json IS NOT NULL",
                     (task["id"],),
                 )
                 or 0
@@ -749,7 +754,8 @@ class Scheduler:
             return 0
         return int(
             self.db.scalar(
-                "SELECT COUNT(*) FROM attempts WHERE task_id=? AND ordinal>? AND status IN ('finished','failed')",
+                "SELECT COUNT(*) FROM attempts WHERE task_id=? AND ordinal>? AND status='finished' "
+                "AND result_json IS NOT NULL",
                 (task["id"], best["ordinal"]),
             )
             or 0

@@ -84,6 +84,19 @@ class ProviderHttpTests(unittest.TestCase):
         self.assertAlmostEqual(cost, 0.002, places=6)
         self.assertEqual(self.server.requests[0]["authorization"], "Bearer test-key")
 
+    def test_disabled_reasoning_fields(self):
+        self.server.responses.append(
+            {
+                "choices": [{"message": {"content": '{"tool_name":"read_problem","arguments":{}}'}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
+        config = self._config(reasoning_mode="disabled")
+        OpenAICompatibleProvider(config).complete([{"role": "user", "content": "hello"}], tools=False)
+        body = self.server.requests[0]["body"]
+        self.assertEqual(body.get("thinking"), {"type": "disabled"})
+        self.assertEqual(body.get("reasoning_effort"), "none")
+
     def test_native_tool_call(self):
         self.server.responses.append(
             {
@@ -125,6 +138,52 @@ class ProviderHttpTests(unittest.TestCase):
         self.assertEqual(len(self.server.requests), 2)
         self.assertIn("tools", self.server.requests[0]["body"])
         self.assertNotIn("tools", self.server.requests[1]["body"])
+
+    def test_runtime_native_tool_transcript_has_tool_call_id(self):
+        def native_response(call_id, name, arguments):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": call_id,
+                                    "type": "function",
+                                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+
+        self.server.responses.extend(
+            [
+                native_response(
+                    "call-create",
+                    "create_candidate",
+                    {"files": [{"path": "kernel.asc", "content": "// native\n"}], "hypothesis": "native tools"},
+                ),
+                native_response("call-submit", "request_submission", {}),
+            ]
+        )
+        config = self._config(supports_tool_calls=True)
+        env = make_env(Path(tempfile.mkdtemp(prefix="af-native-runtime-")), provider=OpenAICompatibleProvider(config))
+        task = seed_task(env, status="running", config={"min_submit_interval_sec": 60})
+        self.assertEqual(env.runtime.step(task["id"]), "continue")
+        self.assertEqual(env.runtime.step(task["id"]), "waiting")
+        second_messages = self.server.requests[1]["body"]["messages"]
+        assistant_calls = [m for m in second_messages if m.get("role") == "assistant" and m.get("tool_calls")]
+        tool_messages = [m for m in second_messages if m.get("role") == "tool"]
+        self.assertEqual(len(assistant_calls), 1)
+        self.assertEqual(assistant_calls[0]["tool_calls"][0]["id"], "call-create")
+        self.assertEqual(len(tool_messages), 1)
+        self.assertEqual(tool_messages[0]["tool_call_id"], "call-create")
+        submission = env.db.query_one("SELECT * FROM submissions WHERE task_id=?", (task["id"],))
+        self.assertEqual(submission["state"], "queued")
 
     def test_runtime_uses_http_provider_to_create_and_queue(self):
         self.server.responses.extend(
@@ -173,6 +232,10 @@ class ProviderHttpTests(unittest.TestCase):
         attempt = env.db.query_one("SELECT * FROM attempts WHERE id=?", (submission["attempt_id"],))
         self.assertIsNotNone(attempt["snapshot_id"])
         self.assertGreaterEqual(len(self.server.requests), 2)
+        # JSON-action protocol must not emit role=tool without a tool_call_id.
+        roles = [msg.get("role") for msg in self.server.requests[1]["body"]["messages"]]
+        self.assertNotIn("tool", roles)
+        self.assertIn("user", roles)
 
 
 if __name__ == "__main__":

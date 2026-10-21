@@ -934,6 +934,7 @@ class Handler(BaseHTTPRequestHandler):
             "max_tokens": body.get("max_tokens", existing.get("max_tokens", 2048)),
             "temperature": body.get("temperature", existing.get("temperature", 0.2)),
             "timeout": body.get("timeout", existing.get("timeout", 120)),
+            "reasoning_mode": body.get("reasoning_mode", existing.get("reasoning_mode", "auto")),
             "price_prompt_per_1k": body.get("price_prompt_per_1k", existing.get("price_prompt_per_1k")),
             "price_completion_per_1k": body.get("price_completion_per_1k", existing.get("price_completion_per_1k")),
             "updated_at": now(),

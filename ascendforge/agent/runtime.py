@@ -190,30 +190,77 @@ class AgentRuntime:
             return "no_action"
 
         update_attempt(self.db, attempt["id"], step_count=int(attempt.get("step_count") or 0) + 1)
-        self._append_message(
-            attempt["id"],
-            "assistant",
-            json_dumps(
-                {
-                    "actions": [action.public() for action in actions],
-                    "text": truncate_text(response.content or "", 2000),
-                }
-            ),
-        )
-        blocked = False
-        for action in actions:
-            result = self.tool_executor.execute(action, task_id=task_id, attempt_id=attempt["id"])
+        native = bool(response.tool_calls)
+        if native:
+            calls = []
+            for index, call in enumerate(response.tool_calls):
+                arguments = call.get("arguments")
+                if not isinstance(arguments, str):
+                    arguments = json_dumps(arguments if arguments is not None else {})
+                calls.append(
+                    {
+                        "id": call.get("id") or f"call-{index}",
+                        "type": "function",
+                        "function": {"name": call.get("name"), "arguments": arguments},
+                    }
+                )
             self._append_message(
                 attempt["id"],
-                "tool",
+                "assistant",
                 json_dumps(
                     {
-                        "action_id": action.action_id,
-                        "tool_name": action.tool_name,
-                        "result": result,
+                        "_native_tool_calls": calls,
+                        "content": truncate_text(response.content or "", 2000),
                     }
                 ),
             )
+        else:
+            self._append_message(
+                attempt["id"],
+                "assistant",
+                json_dumps(
+                    {
+                        "actions": [action.public() for action in actions],
+                        "text": truncate_text(response.content or "", 2000),
+                    }
+                ),
+            )
+        blocked = False
+        for index, action in enumerate(actions):
+            result = self.tool_executor.execute(action, task_id=task_id, attempt_id=attempt["id"])
+            if native:
+                # Keep a valid OpenAI-native transcript: assistant tool_calls
+                # followed by role=tool with the matching tool_call_id.
+                call_id = response.tool_calls[index].get("id") or f"call-{index}"
+                self._append_message(
+                    attempt["id"],
+                    "tool",
+                    json_dumps(
+                        {
+                            "_tool_call_id": call_id,
+                            "_tool_name": action.tool_name,
+                            # Keep the envelope valid JSON and its tool/assistant
+                            # pairing intact; only the observation is clipped.
+                            "content": self._clip_result_text(result),
+                        }
+                    ),
+                )
+            else:
+                # JSON-action mode is not OpenAI native tool calling: a bare
+                # role="tool" message has no tool_call_id and strict gateways
+                # reject it.  Deliver the result as a user observation instead.
+                self._append_message(
+                    attempt["id"],
+                    "user",
+                    "TOOL RESULT\n"
+                    + json_dumps(
+                        {
+                            "action_id": action.action_id,
+                            "tool_name": action.tool_name,
+                            "result": result,
+                        }
+                    ),
+                )
             add_event(
                 self.db,
                 task_id,
@@ -321,7 +368,46 @@ class AgentRuntime:
         rows = self.db.query(
             "SELECT role, content FROM agent_messages WHERE attempt_id=? ORDER BY seq", (attempt_id,)
         )
-        return [{"role": row["role"], "content": row["content"]} for row in rows]
+        messages = []
+        for row in rows:
+            role = row["role"]
+            content = row["content"]
+            if role == "assistant" and content.startswith("{"):
+                envelope = json_loads(content, None)
+                if isinstance(envelope, dict) and "_native_tool_calls" in envelope:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": envelope.get("content") or "",
+                            "tool_calls": envelope["_native_tool_calls"],
+                        }
+                    )
+                    continue
+            if role == "tool":
+                envelope = json_loads(content, None)
+                if isinstance(envelope, dict) and "_tool_call_id" in envelope:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": envelope["_tool_call_id"],
+                            "name": envelope.get("_tool_name") or "",
+                            "content": envelope.get("content") or "",
+                        }
+                    )
+                    continue
+                # legacy/invalid bare tool message: downgrade to a user
+                # observation so strict gateways cannot reject it
+                messages.append({"role": "user", "content": content})
+                continue
+            messages.append({"role": role, "content": content})
+        return messages
+
+    @staticmethod
+    def _clip_result_text(value: Any, limit: int = 12_000) -> str:
+        text = json_dumps(value)
+        if len(text) > limit:
+            text = text[:limit] + "\n...[tool result truncated]..."
+        return text
 
     def _append_message(self, attempt_id: str, role: str, content: str) -> None:
         seq = int(

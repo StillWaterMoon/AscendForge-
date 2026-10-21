@@ -46,13 +46,17 @@ def _schema(
 TOOLS: dict[str, dict] = {
     "read_problem": {
         "name": "read_problem",
-        "description": "Read the imported problem contract, template file list and editable template contents. Call this before writing code if the contract is unclear.",
+        "description": "Read the imported problem contract, template file list, editable contents and small read-only files (interface/dtype hints). Call this before writing code if the contract is unclear.",
         "parameters": _schema(
             {
                 "include_contents": {
                     "type": "boolean",
                     "description": "Include editable template contents (default true).",
-                }
+                },
+                "include_readonly": {
+                    "type": "boolean",
+                    "description": "Include small read-only template files (default true; interface/dtype hints often live there).",
+                },
             },
             description="Read problem metadata and template files.",
         ),

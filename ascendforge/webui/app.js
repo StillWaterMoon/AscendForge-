@@ -966,6 +966,10 @@ async function renderSettings() {
           <div class="field"><label for="m-maxtok">max_tokens</label><input id="m-maxtok" type="number" min="16" max="32768" value="${esc(model.max_tokens || 2048)}"></div>
           <div class="field"><label for="m-temp">temperature</label><input id="m-temp" type="number" min="0" max="2" step="0.05" value="${esc(model.temperature ?? 0.2)}"></div>
           <div class="field"><label for="m-timeout">请求超时（秒）</label><input id="m-timeout" type="number" min="10" max="600" value="${esc(model.timeout || 120)}"></div>
+          <div class="field"><label for="m-reasoning">推理模式</label><select id="m-reasoning">
+            <option value="auto" ${model.reasoning_mode === 'disabled' ? '' : 'selected'}>自动</option>
+            <option value="disabled" ${model.reasoning_mode === 'disabled' ? 'selected' : ''}>禁用长推理（推荐给工具 Agent）</option>
+          </select><div class="hint">部分 deepseek-flash/Qwen 网关会先进行长推理；禁用后直接输出工具调用。</div></div>
           <div class="field"><label for="m-price-p">输入单价 / 1K tokens（可选）</label><input id="m-price-p" type="number" min="0" step="0.000001" value="${esc(model.price_prompt_per_1k ?? '')}"></div>
           <div class="field"><label for="m-price-c">输出单价 / 1K tokens（可选）</label><input id="m-price-c" type="number" min="0" step="0.000001" value="${esc(model.price_completion_per_1k ?? '')}"></div>
           <div class="field span-2"><label class="checkbox"><input id="m-tools" type="checkbox" ${model.supports_tool_calls ? 'checked' : ''}> 该模型/网关支持原生 tool calling（不支持时使用 JSON 动作协议）</label></div>
@@ -1022,6 +1026,7 @@ async function renderSettings() {
           max_tokens: Number($('#m-maxtok').value),
           temperature: Number($('#m-temp').value),
           timeout: Number($('#m-timeout').value),
+          reasoning_mode: $('#m-reasoning').value,
           price_prompt_per_1k: $('#m-price-p').value === '' ? null : Number($('#m-price-p').value),
           price_completion_per_1k: $('#m-price-c').value === '' ? null : Number($('#m-price-c').value),
         },
