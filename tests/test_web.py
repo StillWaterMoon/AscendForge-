@@ -88,6 +88,18 @@ class WebTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
+    def test_00_index_and_static_assets(self):
+        with urllib.request.urlopen(self.base + "/", timeout=20) as response:
+            html = response.read()
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"AscendForge", html)
+        with urllib.request.urlopen(self.base + "/static/app.js", timeout=20) as response:
+            js = response.read()
+        self.assertIn(b"renderDashboard", js)
+        with urllib.request.urlopen(self.base + "/static/style.css", timeout=20) as response:
+            css = response.read()
+        self.assertIn(b"--accent", css)
+
     def test_01_health_and_setup_flow(self):
         status, payload = self.client.request("GET", "/api/health")
         self.assertEqual(status, 200)

@@ -770,9 +770,9 @@ class CannjudgeAdapter(PlatformAdapter):
                     "CANNJudge 提交时服务端返回 5xx，无法确认是否已受理",
                     details={"http_status": exc.http_status, "error": exc.public()},
                 ) from None
-            if exc.code == "NETWORK_ERROR":
+            if exc.code in ("NETWORK_ERROR", "BAD_RESPONSE"):
                 raise SubmissionUnknown(
-                    "提交请求网络超时/中断，远端可能已受理，必须先对账",
+                    "提交请求超时/中断或响应无法解析，远端可能已受理，必须先对账",
                     details={"error": exc.public()},
                 ) from None
             raise

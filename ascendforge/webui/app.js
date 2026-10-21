@@ -185,15 +185,16 @@ async function api(path, options = {}) {
   try { data = await response.json(); } catch (_) { data = {}; }
   if (!response.ok) {
     const error = data.error || { code: 'HTTP_' + response.status, message: response.statusText };
-    if (error.code === 'AUTH_REQUIRED') {
-      state.me = null;
-      state.csrf = null;
-      renderLogin('登录已过期，请重新登录');
-    }
     const err = new Error(error.message || `HTTP ${response.status}`);
     err.code = error.code;
     err.status = response.status;
     err.details = error.details || {};
+    if (error.code === 'AUTH_REQUIRED') {
+      state.me = null;
+      state.csrf = null;
+      if (!document.getElementById('login-form')) renderLogin('登录已过期，请重新登录');
+      err.handled = true;
+    }
     throw err;
   }
   return data;
@@ -363,7 +364,9 @@ async function route() {
     else if (view === 'backups') await renderBackups();
     else { location.hash = '#/dashboard'; }
   } catch (err) {
-    $('#view').innerHTML = `<div class="alert error">${esc(err.message || err)}</div>`;
+    if (!err.handled) {
+      $('#view').innerHTML = `<div class="alert error">${esc(err.message || err)}</div>`;
+    }
   }
 }
 
@@ -767,7 +770,7 @@ async function taskAction(taskId, action) {
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '操作失败', 'error');
-    await renderTask(taskId).catch(() => {});
+    if (!err.handled) await renderTask(taskId).catch(() => {});
   }
 }
 

@@ -60,6 +60,8 @@ class RuntimeLoopTests(unittest.TestCase):
 
         # The submitted bytes are exactly the snapshot bytes.
         attempt1 = env.db.query_one("SELECT * FROM attempts WHERE id=?", (submission1["attempt_id"],))
+        snapshot = env.db.query_one("SELECT sha256 FROM snapshots WHERE id=?", (attempt1["snapshot_id"],))
+        self.assertEqual(submission1["request_hash"], snapshot["sha256"])
         self.assertEqual(
             env.platform.submitted[0]["files"],
             snapshot_files(env.db, env.settings, attempt1["snapshot_id"]),

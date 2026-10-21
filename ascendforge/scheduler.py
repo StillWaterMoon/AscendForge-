@@ -226,6 +226,9 @@ class Scheduler:
                 raise TaskError("DUPLICATE_SUBMISSION", "该 attempt 已有在途提交")
             submission_id = new_id("sub")
             current = now()
+            snapshot_row = conn.execute(
+                "SELECT sha256 FROM snapshots WHERE id=?", (attempt["snapshot_id"],)
+            ).fetchone()
             conn.execute(
                 "INSERT INTO submissions(id, task_id, attempt_id, snapshot_id, state, request_hash, "
                 "created_at, updated_at, next_poll_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -235,7 +238,7 @@ class Scheduler:
                     attempt_id,
                     attempt["snapshot_id"],
                     SUBMISSION_QUEUED,
-                    attempt["snapshot_id"],
+                    snapshot_row["sha256"] if snapshot_row else None,
                     current,
                     current,
                     None,

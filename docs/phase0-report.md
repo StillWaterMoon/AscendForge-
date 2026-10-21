@@ -7,7 +7,7 @@
 
 | 项目 | 结论 |
 |---|---|
-| AscendForge 自身闭环 | 已实现并测试（54 个 unittest） |
+| AscendForge 自身闭环 | 已实现并测试（55 个 unittest） |
 | CANNJudge 公开题目/模板/ZIP | **真实联网验证通过** |
 | CANNJudge 登录 | 端点存在（400 password required）；**真实登录未验证** |
 | CANNJudge 真实提交/结果 | 端点存在；**未用真实账号验证** |
