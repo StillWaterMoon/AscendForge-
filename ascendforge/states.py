@@ -1,0 +1,105 @@
+"""Explicit state machines for tasks, attempts and submissions."""
+
+from __future__ import annotations
+
+TASK_PENDING = "pending"
+TASK_RUNNING = "running"
+TASK_PAUSED = "paused"
+TASK_NEEDS_LOGIN = "needs_login"
+TASK_NEEDS_REVIEW = "needs_review"
+TASK_COMPLETED = "completed"
+TASK_FAILED = "failed"
+TASK_STOPPED = "stopped"
+
+TASK_TERMINAL = {TASK_COMPLETED, TASK_FAILED, TASK_STOPPED}
+TASK_ACTIVE = {TASK_RUNNING, TASK_PAUSED, TASK_NEEDS_LOGIN, TASK_NEEDS_REVIEW}
+TASK_ALL = {
+    TASK_PENDING,
+    TASK_RUNNING,
+    TASK_PAUSED,
+    TASK_NEEDS_LOGIN,
+    TASK_NEEDS_REVIEW,
+    TASK_COMPLETED,
+    TASK_FAILED,
+    TASK_STOPPED,
+}
+
+TASK_TRANSITIONS = {
+    TASK_PENDING: {TASK_RUNNING, TASK_STOPPED},
+    TASK_RUNNING: {
+        TASK_PAUSED,
+        TASK_NEEDS_LOGIN,
+        TASK_NEEDS_REVIEW,
+        TASK_COMPLETED,
+        TASK_FAILED,
+        TASK_STOPPED,
+    },
+    TASK_PAUSED: {TASK_RUNNING, TASK_STOPPED},
+    TASK_NEEDS_LOGIN: {TASK_RUNNING, TASK_PAUSED, TASK_STOPPED},
+    TASK_NEEDS_REVIEW: {TASK_RUNNING, TASK_PAUSED, TASK_STOPPED},
+    TASK_COMPLETED: set(),
+    TASK_FAILED: set(),
+    TASK_STOPPED: set(),
+}
+
+ATTEMPT_GENERATED = "generated"
+ATTEMPT_LOCAL_CHECKING = "local_checking"
+ATTEMPT_QUEUED = "queued"
+ATTEMPT_SUBMITTING = "submitting"
+ATTEMPT_SUBMISSION_UNKNOWN = "submission_unknown"
+ATTEMPT_JUDGING = "judging"
+ATTEMPT_FINISHED = "finished"
+ATTEMPT_FAILED = "failed"
+
+ATTEMPT_TERMINAL = {ATTEMPT_FINISHED, ATTEMPT_FAILED}
+ATTEMPT_BLOCKING_AGENT = {
+    ATTEMPT_QUEUED,
+    ATTEMPT_SUBMITTING,
+    ATTEMPT_SUBMISSION_UNKNOWN,
+    ATTEMPT_JUDGING,
+}
+
+SUBMISSION_QUEUED = "queued"
+SUBMISSION_SUBMITTING = "submitting"
+SUBMISSION_SUBMITTED = "submitted"
+SUBMISSION_UNKNOWN = "unknown"
+SUBMISSION_JUDGING = "judging"
+SUBMISSION_FINISHED = "finished"
+SUBMISSION_FAILED = "failed"
+
+SUBMISSION_OPEN = {SUBMISSION_QUEUED, SUBMISSION_SUBMITTING, SUBMISSION_SUBMITTED, SUBMISSION_JUDGING}
+SUBMISSION_INFLIGHT = {SUBMISSION_SUBMITTING, SUBMISSION_SUBMITTED, SUBMISSION_UNKNOWN, SUBMISSION_JUDGING}
+
+OUTCOME_PASSED = "passed"
+OUTCOME_FAILED = "failed"
+OUTCOME_COMPILE_ERROR = "compile_error"
+OUTCOME_RUNTIME_ERROR = "runtime_error"
+OUTCOME_TIMEOUT = "timeout"
+OUTCOME_SYSTEM_ERROR = "system_error"
+OUTCOME_RUNNING = "running"
+OUTCOME_UNKNOWN = "unknown"
+
+OUTCOME_TERMINAL = {
+    OUTCOME_PASSED,
+    OUTCOME_FAILED,
+    OUTCOME_COMPILE_ERROR,
+    OUTCOME_RUNTIME_ERROR,
+    OUTCOME_TIMEOUT,
+    OUTCOME_SYSTEM_ERROR,
+    OUTCOME_UNKNOWN,
+}
+
+
+def can_transition_task(current: str, target: str) -> bool:
+    return target in TASK_TRANSITIONS.get(current, set())
+
+
+class StateError(RuntimeError):
+    pass
+
+
+def assert_task_transition(current: str, target: str) -> None:
+    if current == target:
+        return
+    if not can_transition_task(current, target):
+        raise StateError(f"illegal task transition: {current} -> {target}")

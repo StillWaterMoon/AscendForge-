@@ -1,0 +1,5 @@
+# AscendForge intentionally keeps its runtime dependency surface tiny.
+# The web server, scheduler, storage and Agent protocol use the Python 3.11+
+# standard library.  `cryptography` is required to encrypt stored credentials
+# (model API keys and CANNJudge session cookies) at rest.
+cryptography>=42,<47

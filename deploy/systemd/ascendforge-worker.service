@@ -1,0 +1,35 @@
+[Unit]
+Description=AscendForge optimization worker (昇腾工坊)
+Documentation=https://github.com/your-org/ascendforge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ascendforge
+Group=ascendforge
+# If ASCENDFORGE_EXECUTOR=docker, the service user must be able to access
+# /var/run/docker.sock (e.g. member of the docker group).  Docker socket access
+# is root-equivalent; keep this server dedicated and isolated.
+WorkingDirectory=/opt/ascendforge
+EnvironmentFile=/etc/ascendforge/ascendforge.env
+ExecStart=/opt/ascendforge/.venv/bin/python -m ascendforge worker
+Restart=always
+RestartSec=3
+TimeoutStopSec=60
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ascendforge
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

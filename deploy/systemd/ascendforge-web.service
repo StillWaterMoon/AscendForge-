@@ -1,0 +1,31 @@
+[Unit]
+Description=AscendForge web/API (昇腾工坊)
+Documentation=https://github.com/your-org/ascendforge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ascendforge
+Group=ascendforge
+WorkingDirectory=/opt/ascendforge
+EnvironmentFile=/etc/ascendforge/ascendforge.env
+ExecStart=/opt/ascendforge/.venv/bin/python -m ascendforge serve
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ascendforge
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

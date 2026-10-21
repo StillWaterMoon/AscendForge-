@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AscendForge · 昇腾工坊</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar" id="topbar" hidden>
+      <a class="brand" href="#/dashboard" aria-label="AscendForge">
+        <span class="brand-mark">AF</span>
+        <span class="brand-text"><strong>AscendForge</strong><small>昇腾工坊</small></span>
+      </a>
+      <nav class="nav" id="nav">
+        <a href="#/dashboard" data-nav="dashboard">任务</a>
+        <a href="#/platform" data-nav="platform">平台连接</a>
+        <a href="#/settings" data-nav="settings">模型与设置</a>
+        <a href="#/backups" data-nav="backups">备份</a>
+      </nav>
+      <div class="topbar-right">
+        <span class="worker-pill" id="worker-pill" title="后台 worker 状态">worker ?</span>
+        <span class="user" id="current-user"></span>
+        <button class="btn btn-ghost btn-sm" id="logout-btn" type="button">退出</button>
+      </div>
+    </header>
+    <main id="view" class="view"></main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

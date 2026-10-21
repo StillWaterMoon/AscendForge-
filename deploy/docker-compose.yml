@@ -1,0 +1,55 @@
+# Run from the repository root:
+#   cp .env.example .env && edit .env
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# The data volume is persistent: deleting containers does not delete the DB,
+# snapshots or backups.  Never run `docker compose down -v` unless you intend to
+# destroy all experiments.
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ascendforge:0.1.0
+    env_file:
+      - ../.env
+    environment:
+      ASCENDFORGE_HOST: 0.0.0.0
+      ASCENDFORGE_PORT: 8080
+      ASCENDFORGE_DATA_DIR: /var/lib/ascendforge
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ascendforge-data:/var/lib/ascendforge
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker:
+    image: ascendforge:0.1.0
+    command: ["python", "-m", "ascendforge", "worker"]
+    env_file:
+      - ../.env
+    environment:
+      ASCENDFORGE_DATA_DIR: /var/lib/ascendforge
+      # The default compose worker cannot use Docker-in-Docker.  For production,
+      # run the worker on the host (systemd) with ASCENDFORGE_EXECUTOR=docker,
+      # or provide a dedicated isolated executor node.
+      ASCENDFORGE_EXECUTOR: local
+    volumes:
+      - ascendforge-data:/var/lib/ascendforge
+    depends_on:
+      - web
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  ascendforge-data:

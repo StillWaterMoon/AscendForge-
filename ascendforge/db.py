@@ -1,0 +1,372 @@
+"""SQLite persistence layer.
+
+SQLite is deliberate: AscendForge is a single-user, single-server system with a
+small number of writers (web process + one worker).  WAL mode plus short
+``BEGIN IMMEDIATE`` transactions gives us atomic quota checks and crash-safe
+state without an external database service.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
+
+SCHEMA_VERSION = 1
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    disabled INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    csrf_token TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    ip TEXT,
+    user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS idempotency (
+    key TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS credentials (
+    kind TEXT PRIMARY KEY,
+    ciphertext TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'cannjudge',
+    problem_id TEXT,
+    problem_url TEXT,
+    problem_title TEXT,
+    problem_json TEXT,
+    template_json TEXT,
+    package_rel TEXT,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    best_attempt_id TEXT,
+    best_metric_json TEXT,
+    local_best_json TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    started_at REAL,
+    paused_at REAL,
+    stopped_at REAL,
+    stop_reason TEXT,
+    next_action_at REAL NOT NULL,
+    last_error_code TEXT,
+    last_error TEXT,
+    created_by TEXT,
+    worker_id TEXT,
+    worker_lease_until REAL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_next ON tasks(status, next_action_at);
+
+CREATE TABLE IF NOT EXISTS attempts (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    parent_attempt_id TEXT,
+    status TEXT NOT NULL,
+    hypothesis TEXT,
+    summary TEXT,
+    snapshot_id TEXT,
+    generator_id TEXT,
+    provider TEXT,
+    model TEXT,
+    prompt_version TEXT,
+    result_json TEXT,
+    normalized_json TEXT,
+    local_validation_json TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_estimate REAL,
+    step_count INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_attempts_task ON attempts(task_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    attempt_id TEXT,
+    kind TEXT NOT NULL DEFAULT 'candidate',
+    sha256 TEXT NOT NULL,
+    rel_dir TEXT NOT NULL,
+    file_count INTEGER NOT NULL,
+    total_bytes INTEGER NOT NULL,
+    files_json TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_task ON snapshots(task_id);
+
+CREATE TABLE IF NOT EXISTS generators (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    attempt_id TEXT,
+    generator_snapshot_id TEXT,
+    reference_snapshot_id TEXT,
+    seed INTEGER,
+    spec_json TEXT,
+    validation_json TEXT,
+    last_validation_json TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_generators_task ON generators(task_id);
+
+CREATE TABLE IF NOT EXISTS submissions (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    attempt_id TEXT,
+    snapshot_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    request_hash TEXT,
+    idempotency_key TEXT,
+    sent_at REAL,
+    remote_id TEXT,
+    http_status INTEGER,
+    response_json TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    unknown_reason TEXT,
+    unknown_json TEXT,
+    reconciled_at REAL,
+    poll_count INTEGER NOT NULL DEFAULT 0,
+    next_poll_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    resolved_by TEXT,
+    resolution_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_state ON submissions(state, next_poll_at);
+CREATE INDEX IF NOT EXISTS idx_submissions_task ON submissions(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_submissions_sent ON submissions(sent_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_remote ON submissions(remote_id)
+    WHERE remote_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS model_calls (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    attempt_id TEXT,
+    provider TEXT,
+    model TEXT,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_estimate REAL,
+    cost_known INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    ok INTEGER NOT NULL DEFAULT 1,
+    error_code TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_model_calls_task ON model_calls(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    attempt_id TEXT,
+    type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, id);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_attempt ON agent_messages(attempt_id, seq);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor TEXT,
+    action TEXT NOT NULL,
+    target TEXT,
+    detail_json TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+"""
+
+
+class Database:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+
+    # -- connection -------------------------------------------------------
+    def connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.path), timeout=30.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def init(self) -> None:
+        conn = self.connect()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(SCHEMA)
+            conn.execute(
+                "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(SCHEMA_VERSION),),
+            )
+        finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    # -- simple queries ---------------------------------------------------
+    def query(self, sql: str, params: tuple | list = ()) -> list[dict[str, Any]]:
+        conn = self.connect()
+        try:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def query_one(self, sql: str, params: tuple | list = ()) -> dict[str, Any] | None:
+        conn = self.connect()
+        try:
+            row = conn.execute(sql, tuple(params)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def execute(self, sql: str, params: tuple | list = ()) -> int:
+        conn = self.connect()
+        try:
+            cur = conn.execute(sql, tuple(params))
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def insert(self, sql: str, params: tuple | list = ()) -> int:
+        conn = self.connect()
+        try:
+            cur = conn.execute(sql, tuple(params))
+            return int(cur.lastrowid or 0)
+        finally:
+            conn.close()
+
+    def scalar(self, sql: str, params: tuple | list = ()) -> Any:
+        conn = self.connect()
+        try:
+            row = conn.execute(sql, tuple(params)).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+
+    # -- meta / settings --------------------------------------------------
+    def meta_get(self, key: str, default: str | None = None) -> str | None:
+        row = self.query_one("SELECT value FROM schema_meta WHERE key=?", (key,))
+        return row["value"] if row else default
+
+    def meta_set(self, key: str, value: str) -> None:
+        self.execute(
+            "INSERT INTO schema_meta(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+    def setting_get(self, key: str, default: Any = None) -> Any:
+        from .util import json_loads
+
+        row = self.query_one("SELECT value_json FROM app_settings WHERE key=?", (key,))
+        return json_loads(row["value_json"], default) if row else default
+
+    def setting_set(self, key: str, value: Any) -> None:
+        from .util import canonical_json, now
+
+        self.execute(
+            "INSERT INTO app_settings(key, value_json, updated_at) VALUES(?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+            (key, canonical_json(value), now()),
+        )
+
+    # -- maintenance ------------------------------------------------------
+    def backup_to(self, target: Path) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source = self.connect()
+        destination = sqlite3.connect(str(target))
+        try:
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+
+    def integrity_check(self) -> str:
+        return str(self.scalar("PRAGMA integrity_check") or "unknown")
+
+    def wait_ready(self, timeout: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout
+        last: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                self.scalar("SELECT 1")
+                return
+            except Exception as exc:  # pragma: no cover - startup race
+                last = exc
+                time.sleep(0.2)
+        raise RuntimeError(f"database not ready: {last}")

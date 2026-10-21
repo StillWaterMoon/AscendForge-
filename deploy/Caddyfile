@@ -1,0 +1,27 @@
+# Caddy reverse proxy with automatic HTTPS.
+# Replace ascendforge.example.com and the email before use.
+{
+    email admin@example.com
+}
+
+ascendforge.example.com {
+    encode zstd gzip
+
+    # The AscendForge server only listens on loopback; Caddy terminates TLS.
+    reverse_proxy 127.0.0.1:8080
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+
+    # Backups/archives can be large; do not set a tiny timeout.
+    timeouts {
+        read_body 10m
+        write 10m
+        idle 5m
+    }
+}
