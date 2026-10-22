@@ -314,19 +314,24 @@ class Handler(BaseHTTPRequestHandler):
     def _client_ip(self) -> str:
         return str(self.client_address[0]) if self.client_address else "unknown"
 
-    def _read_json(self) -> dict:
+    def _read_body(self) -> bytes:
         length = self.headers.get("Content-Length")
         if length is None:
-            return {}
+            return b""
         try:
             size = int(length)
         except ValueError:
             raise ApiError(400, "BAD_BODY", "invalid Content-Length") from None
         if size <= 0:
-            return {}
+            return b""
         if size > MAX_BODY_BYTES:
             raise ApiError(413, "BODY_TOO_LARGE", "request body too large")
-        raw = self.rfile.read(size)
+        return self.rfile.read(size)
+
+    def _read_json(self) -> dict:
+        raw = self._body_raw if self._body_raw is not None else self._read_body()
+        if not raw:
+            return {}
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -407,6 +412,11 @@ class Handler(BaseHTTPRequestHandler):
         self._session_cache = None
         self._session_loaded = False
         try:
+            # Always drain a request body, even when the route handler does not
+            # parse it.  Otherwise a keep-alive client that sends `{}` on a POST
+            # leaves those bytes in the socket and the next request line becomes
+            # "{}GET ..." (observed as HTTP 501 on the dashboard).
+            self._body_raw = self._read_body()
             if method == "GET" and path in ("/", "/index.html"):
                 self._serve_static("index.html", "text/html; charset=utf-8")
                 return
@@ -704,6 +714,7 @@ class Handler(BaseHTTPRequestHandler):
     def h_task_detail(self, task_id: str, **_: Any):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
+        detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()
@@ -809,8 +820,8 @@ class Handler(BaseHTTPRequestHandler):
         )
         self.app.db.execute(
             "UPDATE tasks SET status='running', stop_reason=NULL, stopped_at=NULL, paused_at=NULL, "
-            "last_error_code=NULL, last_error=NULL, next_action_at=?, config_json=?, updated_at=? WHERE id=?",
-            (now(), json_dumps(config), now(), task_id),
+            "last_error_code=NULL, last_error=NULL, started_at=?, next_action_at=?, config_json=?, updated_at=? WHERE id=?",
+            (now(), now(), json_dumps(config), now(), task_id),
         )
         add_event(
             self.app.db,

@@ -656,8 +656,8 @@ async function renderTask(taskId) {
         ${budgetBar('Tokens', usage.total_tokens || 0, config.max_tokens)}
         ${config.max_cost !== null && config.max_cost !== undefined ? budgetBar('费用（已知）', Number(usage.known_cost || 0), Number(config.max_cost), usage.cost_complete ? '' : '未知费用不可当作 0') : '<div class="faint small">未设置费用上限；费用按调用数/token/时间约束。</div>'}
         <div class="row" style="margin-top:12px; gap:18px">
-          <span class="small muted">运行 ${esc(fmtDuration(usage.runtime_sec ?? 0))} / ${esc(fmtDuration(config.max_runtime_sec ?? 0))}</span>
-          <span class="small muted">停滞 ${esc(usage.finished_attempts ?? 0)} 轮</span>
+          <span class="small muted">运行 ${esc(fmtDuration(task.budget?.runtime_sec ?? 0))} / ${esc(fmtDuration(config.max_runtime_sec ?? 0))}</span>
+          <span class="small muted">停滞 ${esc(task.budget?.stall_rounds ?? 0)} / ${esc(config.max_stall_rounds ?? '—')} 轮</span>
         </div>
       </div>
       <div class="card">

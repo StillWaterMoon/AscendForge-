@@ -147,6 +147,7 @@ class Scheduler:
             "attempts": attempts,
             "candidates": candidates,
             "finished_attempts": finished,
+            "stall_rounds": self._stall_rounds(task),
             "submissions_sent": sent,
             "sends_today": self._sent_since(self._day_start(), task["id"]),
             "inflight": self._inflight(),
