@@ -230,6 +230,15 @@ class WebTests(unittest.TestCase):
 
         status, payload = self.client.request(
             "POST",
+            f"/api/tasks/{task['id']}/messages",
+            {"content": "下一轮优先检查 int16 的符号位"},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["messages"][-1]["content"], "下一轮优先检查 int16 的符号位")
+
+        status, payload = self.client.request(
+            "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,

@@ -654,9 +654,9 @@ async function renderTask(taskId) {
       <div class="strategy-strip-main">
         <span class="strategy-strip-label">当前策略 · ${esc(phaseLabel(task.active_strategy?.phase))}</span>
         <span class="strategy-strip-text" title="${esc(task.active_strategy?.text || '')}">${esc(task.active_strategy?.text || '等待第一条远端结果')}</span>
-        <span class="strategy-owner">题目约束：${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 120)) : '未设置'}</span>
+        <span class="strategy-owner">长期约束：${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 120)) : '未设置'}</span>
       </div>
-      <button class="btn btn-sm btn-ghost" data-strategy="1" type="button">编辑题目约束</button>
+      <button class="btn btn-sm btn-ghost" data-message="1" type="button">给 Agent 留言</button>
     </div>
 
     <div class="grid grid-4" style="margin-bottom:16px">
@@ -707,7 +707,7 @@ async function renderTask(taskId) {
   if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
   const continueButton = $('[data-continue-opt]');
   if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
-  $$('[data-strategy]').forEach((button) => button.addEventListener('click', () => openStrategyModal(task)));
+  $$('[data-message]').forEach((button) => button.addEventListener('click', () => openMessageModal(task)));
   $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
@@ -772,6 +772,51 @@ async function openBudgetModal(task) {
     } catch (err) {
       errorBox.hidden = false;
       errorBox.textContent = err.message || '保存失败';
+      button.disabled = false;
+    }
+  });
+}
+
+async function openMessageModal(task) {
+  const messages = task.messages || [];
+  const thread = messages.length
+    ? messages.map((item) => `<div class="message-row">
+        <div class="message-meta"><strong>${esc(item.author || '你')}</strong><span>${esc(fmtTime(item.created_at))}</span></div>
+        <div class="message-body">${esc(item.content || '')}</div>
+      </div>`).join('')
+    : '<div class="empty">还没有留言。告诉 Agent 下一轮要关注什么。</div>';
+  openModal('给 Agent 留言', `
+    <div class="alert info">这是一条异步指令：保存后，下一次新建的 attempt 会读到它。Agent 不会即时聊天，而会在下一轮的 hypothesis / 实验记录里体现是否采纳。</div>
+    <div class="message-thread">${thread}</div>
+    <form id="message-form" class="stack" style="margin-top:14px">
+      <div class="field"><label for="message-text">新的需求 / 观察 / 约束</label>
+        <textarea id="message-text" rows="5" maxlength="4000" placeholder="例如：现在先不要动性能，优先确认 int16 的符号位；或者：下一轮试试 DataCopyPad 的尾部对齐。"></textarea>
+        <div class="hint">最多 4000 字符。会作为 operator message 注入下一次 attempt 的上下文。</div>
+      </div>
+      <div class="alert error" id="message-error" hidden></div>
+      <div class="form-actions">
+        <button class="btn" type="button" data-modal-close>关闭</button>
+        <button class="btn btn-primary" type="submit">发送给 Agent</button>
+      </div>
+    </form>`);
+  $('#message-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorBox = $('#message-error');
+    errorBox.hidden = true;
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api(`/api/tasks/${encodeURIComponent(task.id)}/messages`, {
+        method: 'POST',
+        body: { content: $('#message-text').value.trim() },
+        requestId: uuid(),
+      });
+      closeModal();
+      toast('留言已保存；下一次 attempt 会读取', 'success');
+      renderTask(task.id).catch(() => {});
+    } catch (err) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message || '发送失败';
       button.disabled = false;
     }
   });

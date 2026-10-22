@@ -221,6 +221,16 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_attempt ON agent_messages(attempt_id, seq);
 
+CREATE TABLE IF NOT EXISTS task_messages (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'operator',
+    content TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id, created_at);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor TEXT,

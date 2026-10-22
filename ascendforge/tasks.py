@@ -154,7 +154,40 @@ class TaskService:
         task = self.db.query_one("SELECT * FROM tasks WHERE id=?", (task_id,))
         if not task:
             raise TaskError("TASK_NOT_FOUND", "任务不存在")
-        return self._decode(task)
+        task = self._decode(task)
+        task["messages"] = self.messages(task_id, limit=50)
+        return task
+
+    def messages(self, task_id: str, *, limit: int = 50) -> list[dict]:
+        rows = self.db.query(
+            "SELECT id, author, role, content, created_at FROM task_messages "
+            "WHERE task_id=? ORDER BY created_at DESC LIMIT ?",
+            (task_id, max(1, min(200, int(limit)))),
+        )
+        return list(reversed(rows))
+
+    def add_message(self, task_id: str, content: str, *, author: str = "admin", role: str = "operator") -> dict:
+        text = str(content or "").strip()
+        if not text:
+            raise TaskError("BAD_MESSAGE", "留言不能为空")
+        if len(text) > 4000:
+            raise TaskError("BAD_MESSAGE", "留言不能超过 4000 字符")
+        self.get(task_id)
+        message = {
+            "id": new_id("msg"),
+            "task_id": task_id,
+            "author": str(author or "admin")[:80],
+            "role": str(role or "operator")[:32],
+            "content": text,
+            "created_at": now(),
+        }
+        self.db.insert(
+            "INSERT INTO task_messages(id, task_id, author, role, content, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?)",
+            (message["id"], task_id, message["author"], message["role"], text, message["created_at"]),
+        )
+        add_event(self.db, task_id, None, "operator_message", {"message_id": message["id"], "chars": len(text)})
+        return message
 
     def list(self) -> list[dict]:
         rows = self.db.query("SELECT * FROM tasks ORDER BY created_at DESC")
@@ -217,6 +250,7 @@ class TaskService:
             "template": task.get("template_json"),
             "status": task["status"],
             "config": task.get("config_json"),
+            "messages": task.get("messages") or [],
             "best_attempt_id": task["best_attempt_id"],
             "best_metric": task.get("best_metric_json"),
             "local_best": task.get("local_best_json"),

@@ -97,6 +97,19 @@ class TestcaseDigestTests(unittest.TestCase):
         self.assertIn("precision_ratio is a platform field", context)
 
 
+class OperatorMessageTests(unittest.TestCase):
+    def test_operator_message_is_injected(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-operator-message-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        env.tasks.add_message(task["id"], "下一轮先确认 int16 的符号位", author="admin")
+        attempt = seed_attempt(env, task)
+        messages = env.runtime._build_messages(env.tasks.get(task["id"]), attempt, "system")
+        context = messages[1]["content"]
+        self.assertIn("## Operator messages", context)
+        self.assertIn("下一轮先确认 int16 的符号位", context)
+
+
 class ActiveStrategyTests(unittest.TestCase):
     def test_phase_changes_from_compile_to_correctness_to_performance(self):
         compile_attempt = {

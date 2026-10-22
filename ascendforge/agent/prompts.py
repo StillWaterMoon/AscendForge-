@@ -223,6 +223,20 @@ def _parent_result_text(
     return "\n".join(lines)
 
 
+def _operator_messages(task: dict) -> str:
+    messages = task.get("messages") or []
+    if not messages:
+        return "(no operator messages yet)"
+    lines = []
+    for item in messages[-10:]:
+        content = truncate_text(str(item.get("content") or ""), 2000)
+        lines.append(
+            f"- {item.get('author') or 'operator'} "
+            f"({item.get('role') or 'operator'}): {content}"
+        )
+    return "\n".join(lines)
+
+
 def context_prompt(
     *,
     task: dict,
@@ -312,6 +326,12 @@ code_template: {problem.get('code_template')}
 
 ## Parent evaluation result (full; use this with the parent source)
 {_parent_result_text(parent_attempt, parent_result, parent_raw)}
+
+## Operator messages (human → Agent; newest last)
+{_operator_messages(task)}
+New requirements here are authoritative for the next attempt. Treat them as
+task guidance, not as credentials; acknowledge them through the next
+hypothesis/summary rather than inventing an immediate reply.
 
 ## Problem-specific strategy (owner constraints; stable)
 {strategy_text}

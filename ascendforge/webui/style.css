@@ -764,6 +764,23 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
 .strategy-strip-label { color: var(--accent); font-size: 10.5px; letter-spacing: .06em; white-space: nowrap; font-weight: 650; }
 .strategy-strip-text { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .strategy-owner { color: var(--faint); font-size: 10.5px; border-left: 1px solid var(--border-soft); padding-left: 10px; white-space: nowrap; max-width: 34%; overflow: hidden; text-overflow: ellipsis; }
+.message-thread {
+  max-height: 300px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+.message-row {
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fbf8f2;
+}
+.message-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--faint); font-size: 10.5px; margin-bottom: 4px; }
+.message-meta strong { color: var(--text); font-size: 11px; }
+.message-body { color: var(--text); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   .strategy-strip { align-items: flex-start; }
   .strategy-strip-main { flex-direction: column; gap: 4px; }

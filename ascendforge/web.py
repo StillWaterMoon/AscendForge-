@@ -230,6 +230,8 @@ class App:
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/budget$", "h_update_budget", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
+            ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages", False, True),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages_post", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)/download$", "h_attempt_download", False, True),
@@ -929,6 +931,29 @@ class Handler(BaseHTTPRequestHandler):
                 "update_budget",
                 task_id,
                 json_dumps({"old": {key: old.get(key) for key in patch}, "new": patch}),
+                now(),
+            ),
+        )
+        return self.h_task_detail(task_id)
+
+    def h_task_messages(self, task_id: str, **_: Any):
+        task = self.app.tasks.get(task_id)
+        return 200, {"messages": task.get("messages") or []}
+
+    def h_task_messages_post(self, task_id: str, session: dict | None = None, **_):
+        body = self._read_json()
+        message = self.app.tasks.add_message(
+            task_id,
+            str(body.get("content") or ""),
+            author=(session or {}).get("username", "admin"),
+        )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                (session or {}).get("username"),
+                "operator_message",
+                task_id,
+                json_dumps({"message_id": message["id"], "chars": len(message["content"])}),
                 now(),
             ),
         )
