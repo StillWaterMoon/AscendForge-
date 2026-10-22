@@ -647,6 +647,14 @@ async function renderTask(taskId) {
 
     ${renderTaskAlert(task, quota)}
 
+    <div class="strategy-strip">
+      <div class="strategy-strip-main">
+        <span class="strategy-strip-label">题目策略</span>
+        <span class="strategy-strip-text">${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 240)) : '未设置；通用优化方法由 optimize-operator skill 提供'}</span>
+      </div>
+      <button class="btn btn-sm btn-ghost" data-strategy="1" type="button">编辑策略</button>
+    </div>
+
     <div class="grid grid-4" style="margin-bottom:16px">
       <div class="metric"><div class="metric-label">远端最好</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '仅通过且可比的远端结果' : '暂无')}</div></div>
       <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">尝试上限 ${esc(config.max_attempts ?? '—')} · 提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>
@@ -695,8 +703,7 @@ async function renderTask(taskId) {
   if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
   const continueButton = $('[data-continue-opt]');
   if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
-  const strategyButton = $('[data-strategy]');
-  if (strategyButton) strategyButton.addEventListener('click', () => openStrategyModal(task));
+  $$('[data-strategy]').forEach((button) => button.addEventListener('click', () => openStrategyModal(task)));
   $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
@@ -724,6 +731,9 @@ async function openBudgetModal(task) {
         <div class="field"><label for="budget-day-subs">每日提交上限</label><div class="row"><input id="budget-day-subs" type="number" min="0" max="200" value="${esc(config.max_submissions_per_day ?? 20)}"><label class="checkbox"><input id="budget-day-unlimited" type="checkbox" ${Number(config.max_submissions_per_day) === 0 ? 'checked' : ''}>不限</label></div></div>
         <div class="field"><label for="budget-attempts">最多尝试轮数</label><input id="budget-attempts" type="number" min="1" max="500" value="${esc(config.max_attempts ?? 30)}"></div>
         <div class="field"><label for="budget-stall">停滞轮数停止</label><input id="budget-stall" type="number" min="1" max="100" value="${esc(config.max_stall_rounds ?? 5)}"></div>
+        <div class="field"><label for="budget-interval">最小提交间隔（秒，≥60）</label><input id="budget-interval" type="number" min="60" max="86400" value="${esc(config.min_submit_interval_sec ?? 300)}"></div>
+        <div class="field"><label for="budget-inflight">同账号在途上限</label><input id="budget-inflight" type="number" min="1" max="3" value="${esc(config.max_inflight ?? 1)}"></div>
+        <div class="field"><label for="budget-poll">结果轮询间隔（秒）</label><input id="budget-poll" type="number" min="3" max="600" value="${esc(config.poll_interval_sec ?? 10)}"></div>
       </div>
       <div class="hint">“不限”等于 0，调度器会按无限上限处理；模型调用、Token 和运行时长仍由原预算控制。</div>
       <div class="alert error" id="budget-error" hidden></div>
@@ -746,6 +756,9 @@ async function openBudgetModal(task) {
           max_submissions_per_day: $('#budget-day-unlimited').checked ? 0 : Number($('#budget-day-subs').value),
           max_attempts: Number($('#budget-attempts').value),
           max_stall_rounds: Number($('#budget-stall').value),
+          min_submit_interval_sec: Number($('#budget-interval').value),
+          max_inflight: Number($('#budget-inflight').value),
+          poll_interval_sec: Number($('#budget-poll').value),
         },
         requestId: uuid(),
       });
@@ -767,7 +780,7 @@ async function openStrategyModal(task) {
       <div class="alert info">通用优化方法由 <span class="mono">optimize-operator</span> skill 提供。这里只写本题的目标、约束和待验证假设，例如“先覆盖全部 dtype，再优化 UB 分块”。</div>
       <div class="field"><label for="strategy-text">策略文本</label>
         <textarea id="strategy-text" rows="10" maxlength="8000" placeholder="本题进入性能优化阶段，重点研究……">${esc(current)}</textarea>
-        <div class="hint">保存后，下一次模型调用会把它注入任务上下文；不会影响已提交的快照。</div>
+        <div class="hint">保存后只影响下一次新建的 attempt；当前已生成的候选和已提交快照不会回溯改变。任务停止时也可以先改策略，再点“继续优化”。</div>
       </div>
       <div class="alert error" id="strategy-error" hidden></div>
       <div class="form-actions">

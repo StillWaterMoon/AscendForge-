@@ -889,6 +889,9 @@ class Handler(BaseHTTPRequestHandler):
             "max_runtime_sec",
             "max_model_calls",
             "max_tokens",
+            "min_submit_interval_sec",
+            "max_inflight",
+            "poll_interval_sec",
         }
         patch = {}
         for key in allowed:

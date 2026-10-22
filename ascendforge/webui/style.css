@@ -749,6 +749,25 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
 .toast.success { border-color: rgba(22,122,81,.35); }
 
 .task-board, .task-card, .metric, .card { color: var(--text); }
+.strategy-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.42);
+}
+.strategy-strip-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.strategy-strip-label { color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.strategy-strip-text { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) {
+  .strategy-strip { align-items: flex-start; }
+  .strategy-strip-main { flex-direction: column; gap: 4px; }
+  .strategy-strip-text { white-space: normal; }
+}
 .budget-track {
   height: 6px;
   margin-top: 5px;
