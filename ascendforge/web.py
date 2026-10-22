@@ -778,21 +778,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_continue_optimization(self, task_id: str, session: dict | None = None, **_):
         task = self.app.tasks.get(task_id)
-        if task["status"] != "completed" or task.get("stop_reason") != "manual_baseline_finished":
-            raise ApiError(409, "BAD_STATE", "只有已完成的人工基线任务可以继续自动优化")
+        if task["status"] not in ("completed", "stopped"):
+            raise ApiError(409, "BAD_STATE", "只有已停止或已结束的任务可以继续优化")
         if not self.app.credentials.has("model"):
             raise ApiError(409, "MODEL_NOT_CONFIGURED", "请先在“模型与设置”中配置模型 API")
+        previous_status = task["status"]
+        previous_reason = task.get("stop_reason")
+        candidates = int(
+            self.app.db.scalar(
+                "SELECT COUNT(*) FROM attempts WHERE task_id=? AND snapshot_id IS NOT NULL", (task_id,)
+            )
+            or 0
+        )
+        submissions = int(
+            self.app.db.scalar("SELECT COUNT(*) FROM submissions WHERE task_id=? AND sent_at IS NOT NULL", (task_id,))
+            or 0
+        )
         config = dict(task.get("config") or {})
         config.update(
             {
                 "manual_only": False,
-                "max_attempts": max(20, int(config.get("max_attempts") or 20)),
-                "max_submissions_per_task": max(20, int(config.get("max_submissions_per_task") or 20)),
+                # Preserve room for a real continuation even if the previous
+                # run stopped on a low budget or stall threshold.
+                "max_attempts": max(20, int(config.get("max_attempts") or 20), candidates + 10),
+                "max_submissions_per_task": max(
+                    20, int(config.get("max_submissions_per_task") or 20), submissions + 10
+                ),
+                "max_stall_rounds": max(10, int(config.get("max_stall_rounds") or 10)),
             }
         )
         self.app.db.execute(
-            "UPDATE tasks SET status='running', stop_reason=NULL, stopped_at=NULL, next_action_at=?, "
-            "config_json=?, updated_at=? WHERE id=?",
+            "UPDATE tasks SET status='running', stop_reason=NULL, stopped_at=NULL, paused_at=NULL, "
+            "last_error_code=NULL, last_error=NULL, next_action_at=?, config_json=?, updated_at=? WHERE id=?",
             (now(), json_dumps(config), now(), task_id),
         )
         add_event(
@@ -800,11 +817,21 @@ class Handler(BaseHTTPRequestHandler):
             task_id,
             None,
             "continue_optimization",
-            {"actor": (session or {}).get("username", "user"), "previous_reason": "manual_baseline_finished"},
+            {
+                "actor": (session or {}).get("username", "user"),
+                "previous_status": previous_status,
+                "previous_reason": previous_reason,
+            },
         )
         self.app.db.insert(
             "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            ((session or {}).get("username"), "continue_optimization", task_id, "{}", now()),
+            (
+                (session or {}).get("username"),
+                "continue_optimization",
+                task_id,
+                json_dumps({"previous_status": previous_status, "previous_reason": previous_reason}),
+                now(),
+            ),
         )
         return self.h_task_detail(task_id)
 
