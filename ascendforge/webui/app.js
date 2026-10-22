@@ -645,9 +645,9 @@ async function renderTask(taskId) {
       <div class="toolbar">
         ${task.status === 'pending' ? '<button class="btn btn-primary" data-task-action="start">开始</button>' : ''}
         ${(task.counts?.attempts || 0) === 0 && ['pending', 'running'].includes(task.status) ? '<button class="btn" data-baseline-submit="1" title="不依赖模型，直接提交一次模板基线">提交基线（手动）</button>' : ''}
-        ${task.status === 'running' ? '<button class="btn" data-task-action="pause">暂停</button>' : ''}
-        ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume">恢复</button>' : ''}
-        ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop">停止</button>' : ''}
+        ${task.status === 'running' ? '<button class="btn" data-task-action="pause" title="暂停：停止新的模型调用和调度；排队提交保留，可恢复">暂停</button>' : ''}
+        ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume" title="恢复：继续模型调用和排队提交">恢复</button>' : ''}
+        ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop" title="停止：取消尚未发送的排队提交；远端已接受的提交不能撤回">停止</button>' : ''}
         ${['completed', 'stopped'].includes(task.status) && task.model_configured ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
@@ -1011,7 +1011,7 @@ async function continueOptimization(taskId) {
 }
 
 async function taskAction(taskId, action) {
-  if (action === 'stop' && !confirm('停止后不会撤销远端已接受的提交。确认停止？')) return;
+  if (action === 'stop' && !confirm('停止会取消尚未发送的排队提交；已经提交到 CANNJudge、等待或已有结果的提交不能撤回。确认停止？')) return;
   try {
     await api(`/api/tasks/${encodeURIComponent(taskId)}/${action}`, { method: 'POST', body: {} });
     toast(`已${action === 'start' ? '开始' : action === 'pause' ? '暂停' : action === 'resume' ? '恢复' : '停止'}任务`, 'success');
