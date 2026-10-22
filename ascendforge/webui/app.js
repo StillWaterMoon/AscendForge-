@@ -256,9 +256,9 @@ async function refreshWorkerPill() {
 function authShell(inner) {
   return `<div class="auth-shell"><div class="auth-card">
     <div class="auth-brand">
-      <img class="brand-mark brand-logo" src="/static/assets/logo-mark.svg" alt="" width="44" height="44">
-      <div><div class="auth-title">AscendForge</div><div class="muted small">昇腾工坊 · Agent 驱动的算子优化</div></div>
+      <img class="auth-lockup" src="/static/assets/ascendforge-logo.png" alt="AscendForge">
     </div>
+    <div class="auth-tagline">昇腾工坊 · Agent 驱动的算子优化</div>
     ${inner}
     <div class="auth-footer">服务器托管优化循环。关闭网页不会停止任务；凭据只在服务端保存。</div>
   </div></div>`;

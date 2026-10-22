@@ -412,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and path.startswith("/static/"):
                 name = path[len("/static/") :]
-                if name not in ("app.js", "style.css", "assets/logo-mark.svg", "assets/logo-mark.png"):
+                if name not in ("app.js", "style.css", "assets/ascendforge-logo.png", "assets/ascendforge-mark.png"):
                     raise ApiError(404, "NOT_FOUND", "not found")
                 if name.endswith(".js"):
                     content_type = "application/javascript; charset=utf-8"
