@@ -249,6 +249,14 @@ class WebTests(unittest.TestCase):
         self.assertEqual(attempts[0]["provider"], "manual")
         self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
 
+        status, detail = self.client.request(
+            "GET", f"/api/tasks/{task['id']}/attempts/{attempts[0]['id']}"
+        )
+        self.assertEqual(status, 200, detail)
+        self.assertTrue(detail["system_prompt"])
+        self.assertIn("prompt_note", detail)
+        self.assertEqual(detail["messages"], [])
+
         # Simulate the baseline finishing, then continue the same task with the
         # Agent so it retains the baseline history.
         self.env.db.execute(

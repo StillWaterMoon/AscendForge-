@@ -1052,6 +1052,7 @@ function renderAttemptModal() {
     <div class="tabs" id="attempt-tabs">
       ${attemptTab('source', '源码')}
       ${attemptTab('testcases', '测试点')}
+      ${attemptTab('prompt', '提示词')}
       ${attemptTab('result', '远端结果')}
       ${attemptTab('diff-parent', '对比父版本')}
       ${attemptTab('diff-best', '对比 best')}
@@ -1095,6 +1096,31 @@ function renderAttemptBody(data, file, selected) {
         </div>`;
       }).join('')}
     </div>`;
+  }
+  if (state.attemptTab === 'prompt') {
+    const messages = data.messages || [];
+    const renderMessage = (item) => {
+      const label = `${item.role}${item.name ? ` · ${item.name}` : ''}${item.tool_call_id ? ` · ${item.tool_call_id}` : ''}`;
+      const body = item.tool_calls
+        ? jsonPretty(item.tool_calls)
+        : (item.content || '');
+      return `<details class="prompt-block">
+        <summary><span class="prompt-role prompt-role-${esc(item.role)}">${esc(item.role)}</span> <span class="faint mono">#${esc(item.seq)} ${esc(label)}</span></summary>
+        <pre>${esc(body)}</pre>
+      </details>`;
+    };
+    return `<div class="alert info">${esc(data.prompt_note || '')}</div>
+      <details class="prompt-block prompt-system" open>
+        <summary><span class="prompt-role">system</span> <span class="faint">system prompt + skills</span></summary>
+        <pre>${esc(data.system_prompt || '(empty)')}</pre>
+      </details>
+      <details class="prompt-block">
+        <summary><span class="prompt-role">tools</span> <span class="faint">native tool schemas</span></summary>
+        <pre>${esc(jsonPretty(data.tools || []))}</pre>
+      </details>
+      <div class="prompt-transcript">
+        ${messages.length ? messages.map(renderMessage).join('') : '<div class="empty">该 attempt 还没有模型消息。</div>'}
+      </div>`;
   }
   if (state.attemptTab === 'result') {
     return `<div class="code-shell"><div class="code-head"><span class="path">normalized + raw</span></div><div class="code-body"><pre>${esc(jsonPretty({ normalized: data.attempt.normalized_json, raw: data.submission?.response_json || data.attempt.result_json || null }))}</pre></div></div>`;

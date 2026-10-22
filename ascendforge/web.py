@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .agent.prompts import system_prompt
 from .agent.protocol import TOOLS
+from .agent.runtime import SKILLS_FOR_OPTIMIZATION
 from .agent.strategy import derive_active_strategy
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
@@ -1015,6 +1017,12 @@ class Handler(BaseHTTPRequestHandler):
         )
         if submission and submission.get("response_json"):
             submission["response_json"] = json_loads(submission["response_json"], submission["response_json"])
+        system_text = ""
+        try:
+            skill_block, _ = self.app.skills.prompt_block(SKILLS_FOR_OPTIMIZATION)
+            system_text = system_prompt(skill_block)
+        except Exception:
+            system_text = "(current system prompt could not be reconstructed)"
         return 200, {
             "attempt": attempt,
             "snapshot": snapshot,
@@ -1022,7 +1030,51 @@ class Handler(BaseHTTPRequestHandler):
             "parent_diff": parent_diff,
             "best_diff": best_diff,
             "submission": submission,
+            "system_prompt": system_text,
+            "tools": list(TOOLS.values()),
+            "messages": self._agent_messages(attempt_id),
+            "prompt_note": (
+                "Each model call sends the system prompt plus the transcript prefix at that time, "
+                "plus the tool schemas. This view shows the stored attempt transcript."
+            ),
         }
+
+    def _agent_messages(self, attempt_id: str) -> list[dict]:
+        rows = self.app.db.query(
+            "SELECT seq, role, content, created_at FROM agent_messages WHERE attempt_id=? ORDER BY seq",
+            (attempt_id,),
+        )
+        result = []
+        for row in rows:
+            content = row["content"]
+            decoded = None
+            if content.startswith("{"):
+                try:
+                    decoded = json.loads(content)
+                except ValueError:
+                    decoded = None
+            if row["role"] == "assistant" and isinstance(decoded, dict) and "_native_tool_calls" in decoded:
+                result.append(
+                    {
+                        "seq": row["seq"],
+                        "role": "assistant",
+                        "content": decoded.get("content") or "",
+                        "tool_calls": decoded.get("_native_tool_calls") or [],
+                    }
+                )
+            elif row["role"] == "tool" and isinstance(decoded, dict) and "_tool_call_id" in decoded:
+                result.append(
+                    {
+                        "seq": row["seq"],
+                        "role": "tool",
+                        "tool_call_id": decoded.get("_tool_call_id"),
+                        "name": decoded.get("_tool_name"),
+                        "content": decoded.get("content") or "",
+                    }
+                )
+            else:
+                result.append({"seq": row["seq"], "role": row["role"], "content": content})
+        return result
 
     def h_best_download(self, task_id: str, **_: Any):
         task = self.app.tasks.get(task_id)
