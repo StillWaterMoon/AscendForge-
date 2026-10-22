@@ -160,7 +160,13 @@ function setPoll(fn, ms) {
   clearInterval(state.timer);
   state.timer = null;
   if (fn) state.timer = setInterval(() => {
-    if (!document.hidden) fn();
+    if (document.hidden) return;
+    // Do not re-render the page under an open modal or while the operator is
+    // typing. Those re-renders replace the DOM and fight the current focus.
+    if (document.querySelector('.modal')) return;
+    const active = document.activeElement;
+    if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+    fn();
   }, ms);
 }
 
@@ -378,6 +384,7 @@ window.addEventListener('hashchange', route);
 async function renderDashboard() {
   setPoll(() => renderDashboard().catch(() => {}), 5000);
   const [summary, taskData] = await Promise.all([api('/api/summary'), api('/api/tasks')]);
+  const scroll = window.scrollY;
   state.summary = summary;
   const tasks = taskData.tasks || [];
   const counts = summary.counts || {};
@@ -459,6 +466,7 @@ async function renderDashboard() {
       }
     });
   });
+  if (Math.abs(window.scrollY - scroll) > 1) window.scrollTo(0, scroll);
 }
 
 function phaseLabel(phase) {
@@ -611,7 +619,6 @@ document.addEventListener('click', (event) => {
 /* ------------------------------------------------------------------ */
 async function renderTask(taskId) {
   setPoll(() => renderTask(taskId).catch(() => {}), 3000);
-  const scroll = window.scrollY;
   const [data, eventData] = await Promise.all([
     api(`/api/tasks/${encodeURIComponent(taskId)}`),
     api(`/api/tasks/${encodeURIComponent(taskId)}/events?limit=150`),
@@ -624,6 +631,7 @@ async function renderTask(taskId) {
   const best = task.best_metric || task.best_metric_json;
   const isTerminal = ['completed', 'failed', 'stopped'].includes(task.status);
   const events = (eventData.events || []).slice(-120);
+  const scroll = window.scrollY;
 
   $('#view').innerHTML = `
     <div class="row-between" style="margin-bottom:16px">
