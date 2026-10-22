@@ -20,6 +20,10 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 
 2026-10-22 视觉刷新：暖白纸感浅色主题、任务卡片、逐测试点结果。
 
+品牌标识：
+
+![AscendForge logo](docs/screenshots/logo-preview.png)
+
 ![任务面板](docs/screenshots/ui-refresh-dashboard.png)
 
 ![任务详情](docs/screenshots/ui-refresh-task.png)

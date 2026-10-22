@@ -412,9 +412,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and path.startswith("/static/"):
                 name = path[len("/static/") :]
-                if name not in ("app.js", "style.css"):
+                if name not in ("app.js", "style.css", "assets/logo-mark.svg", "assets/logo-mark.png"):
                     raise ApiError(404, "NOT_FOUND", "not found")
-                content_type = "application/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8"
+                if name.endswith(".js"):
+                    content_type = "application/javascript; charset=utf-8"
+                elif name.endswith(".css"):
+                    content_type = "text/css; charset=utf-8"
+                elif name.endswith(".svg"):
+                    content_type = "image/svg+xml"
+                else:
+                    content_type = "image/png"
                 self._serve_static(name, content_type)
                 return
             if method == "GET" and path == "/favicon.ico":

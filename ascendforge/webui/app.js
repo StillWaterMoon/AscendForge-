@@ -256,7 +256,7 @@ async function refreshWorkerPill() {
 function authShell(inner) {
   return `<div class="auth-shell"><div class="auth-card">
     <div class="auth-brand">
-      <span class="brand-mark">AF</span>
+      <img class="brand-mark brand-logo" src="/static/assets/logo-mark.svg" alt="" width="44" height="44">
       <div><div class="auth-title">AscendForge</div><div class="muted small">昇腾工坊 · Agent 驱动的算子优化</div></div>
     </div>
     ${inner}

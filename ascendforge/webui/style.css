@@ -64,6 +64,20 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
   color: #191006; font-weight: 800; font-size: 13px;
   box-shadow: 0 4px 14px rgba(245, 165, 36, 0.28);
 }
+.brand-mark.brand-logo {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: none;
+  box-shadow: 0 4px 12px rgba(42, 38, 31, 0.12);
+  object-fit: contain;
+}
+.auth-brand .brand-mark.brand-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+}
 .brand-text { display: flex; flex-direction: column; line-height: 1.12; }
 .brand-text strong { font-size: 15px; letter-spacing: 0.01em; }
 .brand-text small { color: var(--muted); font-size: 11px; letter-spacing: 0.18em; }
