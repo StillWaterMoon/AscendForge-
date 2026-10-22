@@ -18,7 +18,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 
 本机 headless Chrome 实际截图（演示数据；非真实 CANNJudge 提交）。
 
-2026-10-22 视觉刷新：任务卡片、独立状态栏、逐测试点结果。
+2026-10-22 视觉刷新：暖白纸感浅色主题、任务卡片、逐测试点结果。
 
 ![任务面板](docs/screenshots/ui-refresh-dashboard.png)
 

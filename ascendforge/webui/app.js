@@ -767,8 +767,8 @@ function budgetBar(label, value, max, note = '') {
   const pct = max ? Math.min(100, Math.max(0, (Number(value) / Number(max)) * 100)) : 0;
   return `<div style="margin-bottom:12px">
     <div class="row-between small"><span class="muted">${esc(label)}</span><span class="mono">${esc(value)} / ${esc(max ?? '—')}</span></div>
-    <div style="height:6px;background:#0b1118;border-radius:999px;overflow:hidden;margin-top:5px">
-      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#f5a524,#4cc9f0);"></div>
+    <div class="budget-track">
+      <div class="budget-fill" style="width:${pct}%"></div>
     </div>
     ${note ? `<div class="faint" style="font-size:11px;margin-top:3px">${esc(note)}</div>` : ''}
   </div>`;
@@ -821,7 +821,7 @@ function renderTaskTab(task, events, config, usage) {
       }).join('')}</tbody></table></div>`;
   }
   if (state.taskTab === 'config') {
-    return `<pre class="card" style="background:#080c11">${esc(jsonPretty({ config, problem_id: task.problem_id, problem_url: task.problem_url, best_metric: task.best_metric, local_best: task.local_best, usage }))}</pre>`;
+    return `<pre class="card config-json">${esc(jsonPretty({ config, problem_id: task.problem_id, problem_url: task.problem_url, best_metric: task.best_metric, local_best: task.local_best, usage }))}</pre>`;
   }
   return `<div class="grid grid-2">
     <div>
