@@ -209,6 +209,17 @@ class WebTests(unittest.TestCase):
 
         status, payload = self.client.request(
             "POST",
+            f"/api/tasks/{task['id']}/budget",
+            {"max_submissions_per_task": 7, "max_submissions_per_day": 4, "max_attempts": 9},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["config"]["max_submissions_per_task"], 7)
+        self.assertEqual(payload["task"]["config"]["max_submissions_per_day"], 4)
+        self.assertEqual(payload["task"]["config"]["max_attempts"], 9)
+
+        status, payload = self.client.request(
+            "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,

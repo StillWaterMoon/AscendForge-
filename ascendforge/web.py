@@ -227,6 +227,7 @@ class App:
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/continue-optimization$", "h_continue_optimization", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/budget$", "h_update_budget", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
@@ -806,14 +807,17 @@ class Handler(BaseHTTPRequestHandler):
             or 0
         )
         config = dict(task.get("config") or {})
+        old_attempt_limit = int(config.get("max_attempts") or 20)
+        old_submit_limit = int(config.get("max_submissions_per_task") or 20)
         config.update(
             {
                 "manual_only": False,
-                # Preserve room for a real continuation even if the previous
-                # run stopped on a low budget or stall threshold.
-                "max_attempts": max(20, int(config.get("max_attempts") or 20), candidates + 10),
-                "max_submissions_per_task": max(
-                    20, int(config.get("max_submissions_per_task") or 20), submissions + 10
+                # Preserve a user-adjusted budget. Only add headroom when the
+                # old limit is already exhausted, otherwise every continuation
+                # would silently override an explicit lower limit.
+                "max_attempts": old_attempt_limit if old_attempt_limit > candidates else candidates + 10,
+                "max_submissions_per_task": (
+                    old_submit_limit if old_submit_limit > submissions else submissions + 10
                 ),
                 "max_stall_rounds": max(10, int(config.get("max_stall_rounds") or 10)),
             }
@@ -867,6 +871,57 @@ class Handler(BaseHTTPRequestHandler):
         self.app.db.insert(
             "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
             ((session or {}).get("username"), "update_strategy", task_id, json_dumps({"chars": len(strategy)}), now()),
+        )
+        return self.h_task_detail(task_id)
+
+    def h_update_budget(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        body = self._read_json()
+        allowed = {
+            "max_submissions_per_task",
+            "max_submissions_per_day",
+            "max_attempts",
+            "max_stall_rounds",
+            "max_runtime_sec",
+            "max_model_calls",
+            "max_tokens",
+        }
+        patch = {}
+        for key in allowed:
+            if key not in body:
+                continue
+            try:
+                patch[key] = int(body[key])
+            except (TypeError, ValueError):
+                raise ApiError(400, "BAD_BUDGET", f"{key} 必须是整数") from None
+        if not patch:
+            raise ApiError(400, "BAD_BUDGET", "至少提供一个预算字段")
+        old = dict(task.get("config") or {})
+        config = normalize_config(patch, base=old)
+        self.app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        add_event(
+            self.app.db,
+            task_id,
+            None,
+            "budget_updated",
+            {
+                "actor": (session or {}).get("username", "user"),
+                "old": {key: old.get(key) for key in patch},
+                "new": patch,
+            },
+        )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                (session or {}).get("username"),
+                "update_budget",
+                task_id,
+                json_dumps({"old": {key: old.get(key) for key in patch}, "new": patch}),
+                now(),
+            ),
         )
         return self.h_task_detail(task_id)
 
