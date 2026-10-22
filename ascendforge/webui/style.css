@@ -760,13 +760,15 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.42);
 }
-.strategy-strip-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.strategy-strip-label { color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-.strategy-strip-text { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strategy-strip-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.strategy-strip-label { color: var(--accent); font-size: 10.5px; letter-spacing: .06em; white-space: nowrap; font-weight: 650; }
+.strategy-strip-text { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.strategy-owner { color: var(--faint); font-size: 10.5px; border-left: 1px solid var(--border-soft); padding-left: 10px; white-space: nowrap; max-width: 34%; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 700px) {
   .strategy-strip { align-items: flex-start; }
   .strategy-strip-main { flex-direction: column; gap: 4px; }
   .strategy-strip-text { white-space: normal; }
+  .strategy-owner { border-left: none; padding-left: 0; max-width: 100%; }
 }
 .budget-track {
   height: 6px;

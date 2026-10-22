@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from ..util import json_dumps, truncate_text
+from .strategy import derive_active_strategy
 
 MAX_PROBLEM_CHARS = 24_000
 MAX_TEMPLATE_CHARS = 48_000
@@ -277,6 +278,7 @@ def context_prompt(
             chunks.append(piece)
             used += len(piece)
         parent_text = header + "\n".join(chunks)
+    active_strategy = derive_active_strategy(task, attempts)
     current_state = {
         "task_status": task.get("status"),
         "attempt_status": attempt.get("status"),
@@ -311,8 +313,16 @@ code_template: {problem.get('code_template')}
 ## Parent evaluation result (full; use this with the parent source)
 {_parent_result_text(parent_attempt, parent_result, parent_raw)}
 
-## Problem-specific strategy (from the task owner)
+## Problem-specific strategy (owner constraints; stable)
 {strategy_text}
+
+## Active strategy (auto-derived from current phase; changes with results)
+phase: {active_strategy.get('phase')}
+{active_strategy.get('text')}
+
+This phase instruction is authoritative for the current stage. The stable
+owner constraints above remain authoritative for goals, limits and
+non-negotiables; if they mention an outdated phase, this section wins.
 
 ## Current best source (remote best only; may be empty)
 {best_text}

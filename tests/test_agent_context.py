@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from ascendforge.agent.preflight import preflight_candidate
+from ascendforge.agent.strategy import derive_active_strategy
 
 from tests.helpers import make_env, seed_attempt, seed_task
 
@@ -94,6 +95,39 @@ class TestcaseDigestTests(unittest.TestCase):
         self.assertIn("per-testcase:", context)
         self.assertIn("0.4807", context)
         self.assertIn("precision_ratio is a platform field", context)
+
+
+class ActiveStrategyTests(unittest.TestCase):
+    def test_phase_changes_from_compile_to_correctness_to_performance(self):
+        compile_attempt = {
+            "id": "a1",
+            "ordinal": 3,
+            "normalized": {"outcome": "compile_error", "raw_status": "Compile Error"},
+        }
+        baseline = derive_active_strategy({"best_attempt_id": None}, [])
+        self.assertEqual(baseline["phase"], "baseline")
+        compile_phase = derive_active_strategy({"best_attempt_id": None}, [compile_attempt])
+        self.assertEqual(compile_phase["phase"], "compile")
+        wrong_attempt = {
+            "id": "a2",
+            "ordinal": 4,
+            "normalized": {"outcome": "failed", "raw_status": "Wrong Answer", "testcase_passed": 6, "testcase_total": 15},
+        }
+        wrong_phase = derive_active_strategy({"best_attempt_id": None}, [wrong_attempt])
+        self.assertEqual(wrong_phase["phase"], "correctness")
+        perf = derive_active_strategy({"best_attempt_id": "best"}, [{"id": "best", "ordinal": 9}])
+        self.assertEqual(perf["phase"], "performance")
+        self.assertIn("best", perf["text"])
+
+    def test_active_strategy_is_injected(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-active-strategy-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        attempt = seed_attempt(env, task)
+        messages = env.runtime._build_messages(env.tasks.get(task["id"]), attempt, "system")
+        context = messages[1]["content"]
+        self.assertIn("## Active strategy", context)
+        self.assertIn("建立基线", context)
 
 
 class StrategyConfigTests(unittest.TestCase):

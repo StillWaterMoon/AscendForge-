@@ -461,6 +461,10 @@ async function renderDashboard() {
   });
 }
 
+function phaseLabel(phase) {
+  return ({ baseline: '建立基线', compile: '编译修复', runtime: '运行修复', correctness: '正确性', performance: '性能优化', verify: '确认结果' })[phase] || phase || '等待结果';
+}
+
 function limitLabel(value) {
   return value === 0 || value === null || value === undefined ? '不限' : String(value);
 }
@@ -649,10 +653,11 @@ async function renderTask(taskId) {
 
     <div class="strategy-strip">
       <div class="strategy-strip-main">
-        <span class="strategy-strip-label">题目策略</span>
-        <span class="strategy-strip-text">${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 240)) : '未设置；通用优化方法由 optimize-operator skill 提供'}</span>
+        <span class="strategy-strip-label">当前策略 · ${esc(phaseLabel(task.active_strategy?.phase))}</span>
+        <span class="strategy-strip-text" title="${esc(task.active_strategy?.text || '')}">${esc(task.active_strategy?.text || '等待第一条远端结果')}</span>
+        <span class="strategy-owner">题目约束：${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 120)) : '未设置'}</span>
       </div>
-      <button class="btn btn-sm btn-ghost" data-strategy="1" type="button">编辑策略</button>
+      <button class="btn btn-sm btn-ghost" data-strategy="1" type="button">编辑题目约束</button>
     </div>
 
     <div class="grid grid-4" style="margin-bottom:16px">
@@ -778,9 +783,9 @@ async function openStrategyModal(task) {
   openModal('题目策略', `
     <form id="strategy-form" class="stack">
       <div class="alert info">通用优化方法由 <span class="mono">optimize-operator</span> skill 提供。这里只写本题的目标、约束和待验证假设，例如“先覆盖全部 dtype，再优化 UB 分块”。</div>
-      <div class="field"><label for="strategy-text">策略文本</label>
-        <textarea id="strategy-text" rows="10" maxlength="8000" placeholder="本题进入性能优化阶段，重点研究……">${esc(current)}</textarea>
-        <div class="hint">保存后只影响下一次新建的 attempt；当前已生成的候选和已提交快照不会回溯改变。任务停止时也可以先改策略，再点“继续优化”。</div>
+      <div class="field"><label for="strategy-text">长期目标 / 约束</label>
+        <textarea id="strategy-text" rows="10" maxlength="8000" placeholder="例如：先保证 15/15 Pass；再优化 UB 分块与搬运重叠。">${esc(current)}</textarea>
+        <div class="hint">这里只保存长期目标/约束，不会自动改写；系统会根据最新结果自动派生“当前策略”。保存后只影响下一次新建的 attempt。</div>
       </div>
       <div class="alert error" id="strategy-error" hidden></div>
       <div class="form-actions">

@@ -32,6 +32,7 @@ from typing import Any
 
 from . import __version__
 from .agent.protocol import TOOLS
+from .agent.strategy import derive_active_strategy
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
 from .backup import BackupError, create_backup, list_backups, verify_backup
@@ -716,6 +717,7 @@ class Handler(BaseHTTPRequestHandler):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
+        detail["active_strategy"] = derive_active_strategy(detail, detail.get("attempts") or [])
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()
