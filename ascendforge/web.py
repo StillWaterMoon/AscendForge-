@@ -746,7 +746,7 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(problem, dict):
             detail["problem"] = {
                 key: truncate_text(str(problem[key]), 20_000) if isinstance(problem.get(key), str) else problem.get(key)
-                for key in ("_id", "name", "code_template", "description", "constraints", "score")
+                for key in ("_id", "name", "code_template", "description", "desc", "constraints", "score")
                 if problem.get(key) is not None
             }
         return 200, {"task": detail}

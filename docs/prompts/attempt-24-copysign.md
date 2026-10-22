@@ -6,6 +6,8 @@
 - remote: `6ad99b643ff2fef7e806c2f4`
 - model calls: `[('deepseek-flash', 20095, 79), ('deepseek-flash', 24575, 37), ('gpt-6-astra', 41154, 62), ('gpt-6-astra', 107923, 5591), ('gpt-6-astra', 56609, 48)]`
 > system prompt / tools schema 是当前代码重建的；`agent_messages` 是当时保存的原始转录。
+>
+> 历史注意：这次 attempt 的初始上下文漏掉了题目 `desc` 字段（导入数据用的是 `desc`，旧代码只找 `description`）。该缺陷已在 2026-10-22 修复；本文件保留的是当时实际看到的上下文。
 > 实际请求 = system prompt + 下列 messages 前缀 + tools schema（模型参数另发）。
 
 ## 1. System prompt

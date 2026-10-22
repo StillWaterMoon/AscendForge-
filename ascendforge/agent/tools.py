@@ -224,6 +224,7 @@ class ToolExecutor:
                 for key in (
                     "name",
                     "description",
+                    "desc",
                     "content",
                     "input",
                     "output",

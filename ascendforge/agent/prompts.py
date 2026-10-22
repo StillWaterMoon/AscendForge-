@@ -69,6 +69,7 @@ def _brief_problem(problem: dict) -> str:
         "title",
         "code_template",
         "description",
+        "desc",
         "content",
         "input",
         "output",

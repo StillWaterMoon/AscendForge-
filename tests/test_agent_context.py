@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from ascendforge.agent.preflight import preflight_candidate
+from ascendforge.agent.prompts import _brief_problem
 from ascendforge.agent.strategy import derive_active_strategy
 
 from tests.helpers import make_env, seed_attempt, seed_task
@@ -34,6 +35,12 @@ class PreflightTests(unittest.TestCase):
         result = preflight_candidate({"kernel.asc": "int8_t value;\n"}, problem)
         self.assertTrue(result["ok"])
         self.assertTrue(any("multiple dtypes" in item for item in result["warnings"]))
+
+
+class ProblemBriefTests(unittest.TestCase):
+    def test_cannjudge_desc_field_is_included(self):
+        text = _brief_problem({"name": "copysign", "desc": "hidden problem description"})
+        self.assertIn("hidden problem description", text)
 
 
 class ParentContextTests(unittest.TestCase):
