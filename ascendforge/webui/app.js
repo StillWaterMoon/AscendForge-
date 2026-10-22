@@ -725,7 +725,10 @@ async function renderTask(taskId) {
     row.addEventListener('click', () => openAttempt(task.id, row.dataset.attemptOpen));
   });
   $$('[data-resolve]').forEach((button) => {
-    button.addEventListener('click', () => openResolveModal(task.id, button.dataset.resolve));
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openResolveModal(task.id, button.dataset.resolve);
+    });
   });
   window.scrollTo(0, scroll);
 }
@@ -914,15 +917,15 @@ function renderTaskTab(task, events, config, usage) {
       <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>假设</th><th>父版本</th><th></th></tr></thead>
       <tbody>${task.attempts.map((a) => {
         const n = a.normalized_json || {};
-        return `<tr class="clickable" data-attempt-open="${esc(a.id)}">
+        return `<tr class="clickable record-row" data-attempt-open="${esc(a.id)}" title="点击查看详情">
           <td class="mono">${esc(a.ordinal)}</td>
           <td>${attemptBadge(a.status)}</td>
           <td>${a.normalized_json ? outcomeBadge(n.outcome) : '<span class="faint">—</span>'}</td>
           <td class="mono">${n.testcase_total ? `${esc(n.testcase_passed)}/${esc(n.testcase_total)}` : '—'}</td>
           <td class="mono">${n.score !== undefined && n.score !== null ? 'score=' + esc(n.score) : n.precision_ratio !== undefined && n.precision_ratio !== null ? 'prec=' + esc(n.precision_ratio) : '—'}</td>
-          <td style="max-width:320px">${esc(a.hypothesis || '')}</td>
+          <td class="record-cell" title="${esc(a.hypothesis || '')}">${esc(a.hypothesis || '')}</td>
           <td class="mono faint">${esc(a.parent_attempt_id || '—')}</td>
-          <td><button class="btn btn-sm" type="button" data-attempt-open="${esc(a.id)}">查看</button></td>
+          <td class="faint">›</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }
@@ -934,14 +937,15 @@ function renderTaskTab(task, events, config, usage) {
       <tbody>${submissions.map((s) => {
         const attempt = (task.attempts || []).find((a) => a.id === s.attempt_id) || {};
         const n = attempt.normalized_json || {};
-        return `<tr>
+        const open = attempt.id ? ` data-attempt-open="${esc(attempt.id)}"` : '';
+        return `<tr class="clickable record-row"${open} title="点击查看详情">
           <td class="mono small">${esc(s.id)}</td>
           <td>${badge(SUBMISSION_STATUS[s.state] || s.state, s.state === 'finished' ? 'completed' : s.state === 'unknown' ? 'unknown' : s.state === 'failed' ? 'failed' : 'running')}</td>
           <td class="mono small">${esc(s.remote_id || '—')}</td>
           <td class="small">${esc(fmtTime(s.sent_at))}</td>
           <td>${n.outcome ? outcomeBadge(n.outcome) : '<span class="faint">—</span>'}</td>
-          <td class="small" style="max-width:260px">${esc(s.error_message || '')}</td>
-          <td>${['unknown', 'submitting'].includes(s.state) ? `<button class="btn btn-sm btn-primary" type="button" data-resolve="${esc(s.id)}">对账/确认</button>` : ''}</td>
+          <td class="record-cell" title="${esc(s.error_message || '')}">${esc(s.error_message || '')}</td>
+          <td>${['unknown', 'submitting'].includes(s.state) ? `<button class="btn btn-sm btn-primary" type="button" data-resolve="${esc(s.id)}">对账/确认</button>` : '<span class="faint">›</span>'}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }

@@ -233,6 +233,17 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 tr:last-child td { border-bottom: none; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: rgba(245,165,36,.04); }
+.record-row { height: 44px; }
+.record-row td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.record-row .record-cell { max-width: 360px; }
+.record-row:hover td { background: rgba(185, 111, 12, 0.045); }
 
 /* ---------- code / logs ---------- */
 .code-shell { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #080c11; }
