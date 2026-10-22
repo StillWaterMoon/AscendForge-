@@ -90,8 +90,21 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
             raise TaskError("BAD_CONFIG", f"{key} 必须在 {low}..{high} 之间")
         config[key] = value
 
-    integer("max_submissions_per_task", 1, 500)
-    integer("max_submissions_per_day", 1, 200)
+    def optional_limit(key: str, high: int) -> None:
+        value = config[key]
+        if value is None or value == "":
+            config[key] = 0
+            return
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            raise TaskError("BAD_CONFIG", f"{key} 必须是整数") from None
+        if not 0 <= value <= high:
+            raise TaskError("BAD_CONFIG", f"{key} 必须在 0..{high} 之间（0 表示不限）")
+        config[key] = value
+
+    optional_limit("max_submissions_per_task", 500)
+    optional_limit("max_submissions_per_day", 200)
     integer("min_submit_interval_sec", 60, 86400)
     integer("max_inflight", 1, 3)
     integer("max_model_calls", 1, 5000)

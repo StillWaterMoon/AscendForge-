@@ -4,6 +4,8 @@
 执行环境：本机 AscendForge 实例（`data/`），CANNJudge 真实账号会话，无 NPU/CANN。
 证据文件：[stage1-2026-10-21.json](evidence/stage1-2026-10-21.json)
 
+> 后续进展（2026-10-22）：Agent 在 attempt 24 取得真实 `15/15 Pass`（remote id `6ad99b643ff2fef7e806c2f4`，`precision_ratio=1.0`），best 已写入。本文保留的是 2026-10-21 的模板基线历史，不代表当前最终状态。
+
 ## 1. 结论
 
 **阶段 1 的真实“登录 → 导入题目 → 保存快照 → 提交 → 取得远端 ID → 查询最终结果 → 保存原始反馈”闭环已跑通。**

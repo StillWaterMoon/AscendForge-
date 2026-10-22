@@ -220,6 +220,16 @@ class WebTests(unittest.TestCase):
 
         status, payload = self.client.request(
             "POST",
+            f"/api/tasks/{task['id']}/budget",
+            {"max_submissions_per_task": 0, "max_submissions_per_day": 0},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["config"]["max_submissions_per_task"], 0)
+        self.assertEqual(payload["task"]["config"]["max_submissions_per_day"], 0)
+
+        status, payload = self.client.request(
+            "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,

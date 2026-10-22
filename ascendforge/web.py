@@ -808,7 +808,13 @@ class Handler(BaseHTTPRequestHandler):
         )
         config = dict(task.get("config") or {})
         old_attempt_limit = int(config.get("max_attempts") or 20)
-        old_submit_limit = int(config.get("max_submissions_per_task") or 20)
+        old_submit_limit = config.get("max_submissions_per_task")
+        if old_submit_limit in (None, 0):
+            new_submit_limit = 0  # unlimited stays unlimited
+        else:
+            new_submit_limit = int(old_submit_limit)
+            if new_submit_limit <= submissions:
+                new_submit_limit = submissions + 10
         config.update(
             {
                 "manual_only": False,
@@ -816,9 +822,7 @@ class Handler(BaseHTTPRequestHandler):
                 # old limit is already exhausted, otherwise every continuation
                 # would silently override an explicit lower limit.
                 "max_attempts": old_attempt_limit if old_attempt_limit > candidates else candidates + 10,
-                "max_submissions_per_task": (
-                    old_submit_limit if old_submit_limit > submissions else submissions + 10
-                ),
+                "max_submissions_per_task": new_submit_limit,
                 "max_stall_rounds": max(10, int(config.get("max_stall_rounds") or 10)),
             }
         )

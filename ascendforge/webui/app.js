@@ -425,7 +425,7 @@ async function renderDashboard() {
           const quota = task.quota || {};
           const next = quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待调度';
           const sends = quota.sends_total ?? 0;
-          const maxSends = quota.max_submissions_per_task ?? '—';
+          const maxSends = limitLabel(quota.max_submissions_per_task);
           const error = task.last_error ? String(task.last_error).slice(0, 110) : '';
           return `<article class="task-card status-${esc(task.status)}" data-task-open="${esc(task.id)}" tabindex="0">
             <div class="task-card-top">
@@ -459,6 +459,10 @@ async function renderDashboard() {
       }
     });
   });
+}
+
+function limitLabel(value) {
+  return value === 0 || value === null || value === undefined ? '不限' : String(value);
 }
 
 function taskFootNote(task) {
@@ -504,8 +508,8 @@ async function openNewTaskModal() {
       <details class="advanced">
         <summary>预算与调度（可选）</summary>
         <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>每题提交上限</label><input id="cfg-max-task-subs" type="number" min="1" value="30"></div>
-          <div class="field"><label>每日提交上限</label><input id="cfg-max-day-subs" type="number" min="1" value="20"></div>
+          <div class="field"><label>每题提交上限（0 = 不限）</label><input id="cfg-max-task-subs" type="number" min="0" value="30"></div>
+          <div class="field"><label>每日提交上限（0 = 不限）</label><input id="cfg-max-day-subs" type="number" min="0" value="20"></div>
           <div class="field"><label>最小提交间隔（秒，≥60）</label><input id="cfg-interval" type="number" min="60" value="300"></div>
           <div class="field"><label>同账号在途提交上限</label><input id="cfg-inflight" type="number" min="1" max="3" value="1"></div>
           <div class="field"><label>最多尝试轮数</label><input id="cfg-max-attempts" type="number" min="1" value="30"></div>
@@ -635,6 +639,7 @@ async function renderTask(taskId) {
         ${['completed', 'stopped'].includes(task.status) && task.model_configured ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
+        <button class="btn btn-ghost" data-budget="1" type="button">调整提交上限</button>
         <button class="btn btn-ghost" data-strategy="1" type="button">题目策略</button>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
       </div>
@@ -644,7 +649,7 @@ async function renderTask(taskId) {
 
     <div class="grid grid-4" style="margin-bottom:16px">
       <div class="metric"><div class="metric-label">远端最好</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '仅通过且可比的远端结果' : '暂无')}</div></div>
-      <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">尝试上限 ${esc(config.max_attempts ?? '—')} · 提交上限 ${esc(config.max_submissions_per_task ?? '—')}</div></div>
+      <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">尝试上限 ${esc(config.max_attempts ?? '—')} · 提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>
       <div class="metric"><div class="metric-label">下一次提交</div><div class="metric-value small">${esc(quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待 agent')}</div><div class="metric-note">间隔 ${esc(config.min_submit_interval_sec ?? '—')}s · 在途 ${esc(quota.inflight ?? 0)}</div></div>
       <div class="metric"><div class="metric-label">模型用量</div><div class="metric-value small">${esc(usage.calls ?? 0)} 次</div><div class="metric-note">${esc(usage.total_tokens ?? 0)} tokens · ${usage.cost_complete ? esc(formatCost(usage.known_cost)) : '费用未知'}</div></div>
     </div>
@@ -663,7 +668,7 @@ async function renderTask(taskId) {
       <div class="card">
         <div class="card-head"><h3>调度与设备</h3></div>
         <div class="stack small">
-          <div class="row-between"><span class="muted">今日提交（${esc(quota.day || '')}）</span><span class="mono">${esc(quota.sends_today ?? 0)} / ${esc(quota.max_submissions_per_day ?? '—')}</span></div>
+          <div class="row-between"><span class="muted">今日提交（${esc(quota.day || '')}）</span><span class="mono">${esc(quota.sends_today ?? 0)} / ${esc(limitLabel(quota.max_submissions_per_day))}</span></div>
           <div class="row-between"><span class="muted">账号在途</span><span class="mono">${esc(quota.inflight ?? 0)} / ${esc(quota.max_inflight ?? '—')}</span></div>
           <div class="row-between"><span class="muted">未知提交</span><span class="mono" style="color:${quota.unknown ? 'var(--accent)' : 'inherit'}">${esc(quota.unknown ?? 0)}</span></div>
           <div class="row-between"><span class="muted">执行器 / NPU</span><span class="mono">${esc(task.capabilities?.executor?.selected || '—')} / ${task.capabilities?.npu?.available ? '可用' : '不可用'}</span></div>
@@ -692,8 +697,7 @@ async function renderTask(taskId) {
   if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
   const strategyButton = $('[data-strategy]');
   if (strategyButton) strategyButton.addEventListener('click', () => openStrategyModal(task));
-  const budgetButton = $('[data-budget]');
-  if (budgetButton) budgetButton.addEventListener('click', () => openBudgetModal(task));
+  $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -716,12 +720,12 @@ async function openBudgetModal(task) {
     <form id="budget-form" class="stack">
       <div class="alert info">提交上限可以动态调整，但不能绕过调度器。当前已提交 <strong>${esc(sent)}</strong> 次，候选 <strong>${esc(candidates)}</strong> 个；调到已用值以下会在下一次调度时停止。</div>
       <div class="form-grid">
-        <div class="field"><label for="budget-task-subs">每题提交上限</label><input id="budget-task-subs" type="number" min="1" max="500" value="${esc(config.max_submissions_per_task ?? 30)}"></div>
-        <div class="field"><label for="budget-day-subs">每日提交上限</label><input id="budget-day-subs" type="number" min="1" max="200" value="${esc(config.max_submissions_per_day ?? 20)}"></div>
+        <div class="field"><label for="budget-task-subs">每题提交上限</label><div class="row"><input id="budget-task-subs" type="number" min="0" max="500" value="${esc(config.max_submissions_per_task ?? 30)}"><label class="checkbox"><input id="budget-task-unlimited" type="checkbox" ${Number(config.max_submissions_per_task) === 0 ? 'checked' : ''}>不限</label></div></div>
+        <div class="field"><label for="budget-day-subs">每日提交上限</label><div class="row"><input id="budget-day-subs" type="number" min="0" max="200" value="${esc(config.max_submissions_per_day ?? 20)}"><label class="checkbox"><input id="budget-day-unlimited" type="checkbox" ${Number(config.max_submissions_per_day) === 0 ? 'checked' : ''}>不限</label></div></div>
         <div class="field"><label for="budget-attempts">最多尝试轮数</label><input id="budget-attempts" type="number" min="1" max="500" value="${esc(config.max_attempts ?? 30)}"></div>
         <div class="field"><label for="budget-stall">停滞轮数停止</label><input id="budget-stall" type="number" min="1" max="100" value="${esc(config.max_stall_rounds ?? 5)}"></div>
       </div>
-      <div class="hint">模型调用、Token 和运行时长仍由原预算控制；这里只调整提交/尝试相关上限。</div>
+      <div class="hint">“不限”等于 0，调度器会按无限上限处理；模型调用、Token 和运行时长仍由原预算控制。</div>
       <div class="alert error" id="budget-error" hidden></div>
       <div class="form-actions">
         <button class="btn" type="button" data-modal-close>取消</button>
@@ -738,8 +742,8 @@ async function openBudgetModal(task) {
       await api(`/api/tasks/${encodeURIComponent(task.id)}/budget`, {
         method: 'POST',
         body: {
-          max_submissions_per_task: Number($('#budget-task-subs').value),
-          max_submissions_per_day: Number($('#budget-day-subs').value),
+          max_submissions_per_task: $('#budget-task-unlimited').checked ? 0 : Number($('#budget-task-subs').value),
+          max_submissions_per_day: $('#budget-day-unlimited').checked ? 0 : Number($('#budget-day-subs').value),
           max_attempts: Number($('#budget-attempts').value),
           max_stall_rounds: Number($('#budget-stall').value),
         },

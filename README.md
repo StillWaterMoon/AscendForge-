@@ -4,15 +4,16 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 
 服务器托管优化循环、模型调用、调度、实验存储和提交；本地主机只需要浏览器。关闭网页、电脑关机或 Web 服务重启都不会丢失任务，后台 worker 会从持久化状态恢复。
 
-> **当前验证状态（2026-10-21）**
+> **当前验证状态（2026-10-22）**
 >
 > - CANNJudge 的公开题目解析、模板读取、ZIP 工程下载已在本机**真实联网验证**。
-> - **真实登录、题目导入、一次真实提交、远端 ID、结果查询与独立读回已完成**（2026-10-21，CopySign，remote id `6ad84d04193e507d8e4a0502`）。提交的是模板基线，平台返回 `Runtime Error`（15/15），**不代表算子通过**。
-> - 提交字节与快照逐字节一致：snapshot `3aa9af10...b377b95`，`kernel.asc` SHA-256 `022d2dd0...f8641f`，远端回显一致。
-> - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此所有 Ascend C 候选都标为 `unavailable/untested`，不会伪造设备结果。
+> - **真实登录、题目导入、真实提交、远端 ID、结果查询与独立读回已完成**。模板基线曾返回 `Runtime Error`（15/15），**不代表算子通过**。
+> - **2026-10-22 Agent 在 CopySign 取得真实 `15/15 Pass`**：attempt 24，remote id `6ad99b643ff2fef7e806c2f4`，`precision_ratio=1.0`，best 已写入；任务以 `agent_finished:target_reached` 正常结束。
+> - 早期迭代保留用于诊断：3 次编译错误 + 1 次 `Wrong Answer`。详见 [Agent 编译错误诊断](docs/agent-compile-diagnosis.md)。
+> - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
+> - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
 > - 75 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
-> - Agent 已用 DeepSeek 真实迭代：3 次编译错误 + 1 次 `Wrong Answer`，均保存远端反馈；任务已暂停，未拿到 `Pass`。诊断见 [Agent 编译错误诊断](docs/agent-compile-diagnosis.md)。
 
 ## 界面预览
 
