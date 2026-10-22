@@ -644,7 +644,6 @@ async function renderTask(taskId) {
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
         <button class="btn btn-ghost" data-budget="1" type="button">调整提交上限</button>
-        <button class="btn btn-ghost" data-strategy="1" type="button">题目策略</button>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
       </div>
     </div>
