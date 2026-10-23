@@ -1,5 +1,7 @@
 # CopySign attempt 36 / 37 生成过程
 
+> **2026-10-23 更正**：事后按真实源码逐行审计，#36 相对 #24 **只改了注释**，并没有实现 hypothesis 声称的向量化；#37 是真实的 `kTileBytes`/队列深度修改，但代码里仍保留逐元素标量循环。本文早期把 hypothesis 当成了实现描述，现以本更正和文末“Observed change”为准。
+
 ## 1. 先看结论
 
 | attempt | parent | 结果 | max time | avg time | 相对 baseline |
@@ -8,9 +10,25 @@
 | attempt #36 | `att_1a15f258a52a86955` | Pass | 39174.12 | 7960.52 | +0.02% |
 | attempt #37 | `att_1a166b3846a7c078c` | Pass | 32408.59 | 7100.42 | -17.25% |
 
-- #36：15/15 Pass，但 max/avg 都比 baseline **略慢**，所以没有成为 experiment best。
-- #37：15/15 Pass，max 从 39165.31 降到 32408.59，avg 从 7957.80 降到 7100.42；成为 experiment best，working revision 也推进到 37。
+- #36：15/15 Pass，但 max/avg 都比 baseline **略慢**，所以没有成为 experiment best；**真实 diff 只有注释变化，没有向量化实现**。
+- #37：15/15 Pass，max 从 39165.31 降到 32408.59，avg 从 7957.80 降到 7100.42；成为 experiment best，working revision 也推进到 37。真实 diff 是 `kTileBytes` 8192→32768 和队列 depth 1→2，**标量循环仍在**。
 - global best 仍显示 #24，因为当前 task 的 best metric 是 `precision_ratio`，两者都是 1.0；**性能最好的是 experiment best #37**。
+
+### 1.1 Host observed change
+
+```text
+#36 kind=comments_only effective=false
+    changed file: kernel.asc
+    claim: vector=true, has_vector_api=false, mismatch=true
+
+#37 kind=code effective=true
+    changed file: kernel.asc
+    kTileBytes 8192 -> 32768
+    queue depth 1 -> 2
+    claim: vector=true, has_vector_api=false, mismatch=true
+```
+
+`claim` 的 `mismatch=true` 表示模型描述里出现了向量化，但去掉注释后的代码没有相应的向量 API。
 
 ## 2. Attempt 36
 

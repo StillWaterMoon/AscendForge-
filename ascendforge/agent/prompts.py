@@ -112,6 +112,24 @@ def _template_files(template: dict, *, include_contents: bool = True) -> str:
     return "\n".join(chunks) if chunks else "(no template files)"
 
 
+def _observed_change_text(attempt: dict) -> str:
+    raw = attempt.get("changed_files_json")
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return ""
+    files = data.get("changed_files") or []
+    names = ", ".join(str(item.get("path")) for item in files[:4])
+    claim = data.get("claim") or {}
+    suffix = " claim_mismatch=true" if claim.get("mismatch") else ""
+    return (
+        f"observed_change={data.get('kind') or 'unknown'} files=[{names}] "
+        f"changed_lines={data.get('changed_lines')}{suffix}"
+    )
+
+
 def _history(attempts: list[dict], *, current_id: str | None) -> str:
     if not attempts:
         return "(no previous attempts)"
@@ -128,6 +146,9 @@ def _history(attempts: list[dict], *, current_id: str | None) -> str:
             f"score={normalized.get('score', '-')} precision={normalized.get('precision_ratio', '-')} "
             f"hypothesis={(attempt.get('hypothesis') or '')[:160]!r}"
         )
+        observed = _observed_change_text(attempt)
+        if observed:
+            lines.append("    " + observed)
         if attempt.get("error_message"):
             lines.append(f"    error: {str(attempt['error_message'])[:200]}")
     text = "\n".join(lines)
@@ -205,6 +226,9 @@ def _parent_result_text(
         f"passed={normalized.get('testcase_passed')}/{normalized.get('testcase_total')} "
         f"score={normalized.get('score')} precision_ratio(min)={normalized.get('precision_ratio')}",
     ]
+    observed = _observed_change_text(parent_attempt)
+    if observed:
+        lines.append(observed)
     if normalized.get("message"):
         lines.append("message: " + str(normalized["message"]))
     cases = normalized.get("testcases") or []

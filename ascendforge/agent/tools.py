@@ -39,6 +39,7 @@ from ..scheduler import Scheduler
 from ..states import ATTEMPT_FAILED, ATTEMPT_FINISHED
 from ..tasks import TaskError, TaskService
 from ..util import canonical_json, json_dumps, json_loads, new_id, now, sha256_bytes, truncate_text
+from .change_audit import audit_candidate, claim_check
 from .preflight import preflight_candidate
 from .protocol import Action, ActionError, tool_result_error, tool_result_ok
 
@@ -419,6 +420,15 @@ class ToolExecutor:
         hypothesis = str(arguments.get("hypothesis") or "").strip()
         if not hypothesis:
             raise ToolFailure("BAD_HYPOTHESIS", "hypothesis is required", retryable=False)
+        observed = audit_candidate(parent_files, files)
+        claim = claim_check(hypothesis, files)
+        if parent_attempt and parent_files and not observed["effective"]:
+            raise ToolFailure(
+                "NO_EFFECTIVE_CHANGE",
+                "candidate differs from its parent only in comments/whitespace; "
+                "it is not a new implementation. Make the claimed code change, or "
+                "explicitly start a fresh revision instead of relabeling a comment-only edit.",
+            )
         check = preflight_candidate(files, problem)
         if not check["ok"]:
             details = "; ".join(
@@ -439,6 +449,27 @@ class ToolExecutor:
         fields = {"hypothesis": hypothesis[:4000]}
         if parent:
             fields["parent_attempt_id"] = parent
+            base = self.db.query_one(
+                "SELECT sha256 FROM snapshots WHERE id=?",
+                (parent_attempt.get("snapshot_id"),),
+            )
+            if base:
+                fields["base_snapshot_sha"] = base["sha256"]
+        fields.update(
+            {
+                "diff_sha": observed["diff_sha"],
+                "edit_mode": "rewrite" if observed["rewrite_ratio"] >= 0.6 else "patch",
+                "changed_files_json": json_dumps(
+                    {
+                        "kind": observed["kind"],
+                        "changed_files": observed["changed_files"],
+                        "changed_lines": observed["changed_lines"],
+                        "rewrite_ratio": observed["rewrite_ratio"],
+                        "claim": claim,
+                    }
+                ),
+            }
+        )
         update_attempt(self.db, attempt["id"], **fields)
         experiment_id = attempt.get("experiment_id")
         if not experiment_id:
@@ -459,6 +490,11 @@ class ToolExecutor:
                 "bytes": snapshot["total_bytes"],
                 "hypothesis": hypothesis[:500],
                 "preflight_warnings": check["warnings"],
+                "change_kind": observed["kind"],
+                "changed_files": observed["changed_files"],
+                "changed_lines": observed["changed_lines"],
+                "rewrite_ratio": observed["rewrite_ratio"],
+                "claim_mismatch": claim["mismatch"],
             },
         )
         return {
@@ -471,6 +507,14 @@ class ToolExecutor:
             "filled_from_template": filled,
             "filled_from_parent": filled_parent,
             "preflight": check,
+            "observed_change": {
+                "kind": observed["kind"],
+                "changed_files": observed["changed_files"],
+                "changed_lines": observed["changed_lines"],
+                "rewrite_ratio": observed["rewrite_ratio"],
+                "diff_sha": observed["diff_sha"],
+            },
+            "claim": claim,
             "next": "Call request_submission to enqueue this exact snapshot. Do not modify it in place.",
         }
 

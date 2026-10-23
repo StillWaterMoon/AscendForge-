@@ -36,11 +36,11 @@ class RuntimeLoopTests(unittest.TestCase):
         provider = MockProvider(
             ModelConfig.from_payload(payload),
             script=[
-                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "// v1\n"}], "hypothesis": "baseline"}},
+                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "int f() { return 1; }\n"}], "hypothesis": "baseline"}},
                 {"tool_name": "request_submission", "arguments": {}},
-                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "// v2\n"}], "hypothesis": "tune tiling"}},
+                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "int f() { return 2; }\n"}], "hypothesis": "tune tiling"}},
                 {"tool_name": "request_submission", "arguments": {}},
-                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "// v3\n"}], "hypothesis": "risky change"}},
+                {"tool_name": "create_candidate", "arguments": {"files": [{"path": "kernel.asc", "content": "int f() { return 3; }\n"}], "hypothesis": "risky change"}},
                 {"tool_name": "request_submission", "arguments": {}},
                 {"tool_name": "finish_task", "arguments": {"reason": "no_improvement", "summary": "two passing rounds, third failed"}},
             ],
