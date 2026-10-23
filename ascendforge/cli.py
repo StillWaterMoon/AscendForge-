@@ -87,6 +87,67 @@ def cmd_worker(args) -> int:
     return 0
 
 
+def cmd_parameter_run(args) -> int:
+    settings = _settings(args)
+    from .parameter_runner import (
+        ParameterRunner,
+        SchedulerEvaluator,
+        SimulatedParameterEvaluator,
+    )
+    from .web import App
+
+    app = App(settings)
+    task = app.tasks.get(args.task)
+    experiment = (
+        app.db.query_one("SELECT * FROM experiments WHERE id=? AND task_id=?", (args.experiment, args.task))
+        if args.experiment
+        else app.db.query_one(
+            "SELECT * FROM experiments WHERE task_id=? AND status='active' ORDER BY ordinal DESC LIMIT 1",
+            (args.task,),
+        )
+    )
+    if not experiment:
+        print("没有 active experiment", file=sys.stderr)
+        return 1
+    if args.resume:
+        if task["status"] == "paused":
+            app.tasks.resume(args.task)
+        elif task["status"] == "pending":
+            app.tasks.start(args.task)
+        elif task["status"] != "running":
+            print(f"任务状态 {task['status']} 不能恢复", file=sys.stderr)
+            return 1
+    if app.tasks.get(args.task)["status"] != "running":
+        print("参数 runner 需要任务处于 running；使用 --resume", file=sys.stderr)
+        return 1
+    config = dict(task.get("config") or {})
+    config["parameter_runner_active"] = True
+    app.db.execute(
+        "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+        (json_dumps(config), now(), args.task),
+    )
+    evaluator = SimulatedParameterEvaluator() if args.simulate else SchedulerEvaluator(
+        app.db, app.scheduler, args.task, timeout_sec=args.timeout
+    )
+    try:
+        result = ParameterRunner(
+            app.db, settings, args.task, experiment["id"], evaluator
+        ).run()
+    finally:
+        config.pop("parameter_runner_active", None)
+        app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), args.task),
+        )
+        if not args.keep_running and app.tasks.get(args.task)["status"] == "running":
+            try:
+                app.tasks.pause(args.task, reason="parameter_runner_finished")
+            except Exception:
+                pass
+    print(json_dumps(result, pretty=True))
+    return 0 if result.get("status") == "completed" else 2
+
+
 def cmd_backup(args) -> int:
     settings = _settings(args)
     db = Database(settings.db_path)
@@ -259,6 +320,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     worker = sub.add_parser("worker", help="启动后台优化 worker")
     worker.set_defaults(func=cmd_worker)
+
+    parameter = sub.add_parser("parameter-run", help="运行确定性参数实验 runner")
+    parameter.add_argument("--task", required=True)
+    parameter.add_argument("--experiment", help="默认使用 active experiment")
+    parameter.add_argument("--simulate", action="store_true", help="使用模拟评测，不提交远端")
+    parameter.add_argument("--resume", action="store_true", help="运行前恢复 paused 任务")
+    parameter.add_argument("--keep-running", action="store_true", help="结束后不暂停任务")
+    parameter.add_argument("--timeout", type=float, default=1800, help="每个配置等待远端结果的秒数")
+    parameter.set_defaults(func=cmd_parameter_run)
 
     backup = sub.add_parser("backup", help="创建服务器备份")
     backup.add_argument("--include-key", action="store_true", help="包含主密钥（高风险）")

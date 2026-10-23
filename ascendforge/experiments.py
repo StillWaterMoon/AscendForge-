@@ -247,6 +247,13 @@ ATTEMPT_PATCH_FIELDS = {
     "step_count",
     "finished_at",
     "parent_attempt_id",
+    "experiment_id",
+    "revision_kind",
+    "config_json",
+    "base_snapshot_sha",
+    "diff_sha",
+    "edit_mode",
+    "changed_files_json",
 }
 
 

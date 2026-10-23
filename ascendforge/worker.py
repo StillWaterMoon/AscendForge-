@@ -177,6 +177,12 @@ class Worker:
             if self.stop_event.is_set():
                 break
             task_id = row["id"]
+            task_row = self.db.query_one("SELECT config_json FROM tasks WHERE id=?", (task_id,))
+            config = json_loads(task_row.get("config_json"), {}) if task_row else {}
+            if config.get("parameter_runner_active"):
+                # The deterministic parameter runner owns attempt creation for
+                # this task; the LLM Agent must not race it.
+                continue
             try:
                 lease = self._acquire_lease(task_id)
                 if not lease:
