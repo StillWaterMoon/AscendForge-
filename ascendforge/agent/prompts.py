@@ -326,6 +326,8 @@ baseline_attempt: {(experiment or {}).get('baseline_attempt_id') or '(none)'}
 working_attempt: {(experiment or {}).get('working_attempt_id') or '(none)'}
 experiment_best: {(experiment or {}).get('experiment_best_id') or '(none)'}
 global_best: {task.get('best_attempt_id') or '(none)'}
+baseline_perf: {(experiment or {}).get('baseline_perf') or '(not measured)'}
+global_best_perf: {(experiment or {}).get('global_best_perf') or '(not measured)'}
 
 A revision belongs to the current experiment. Start from the working revision
 when continuing this experiment; a new experiment starts from the global best.

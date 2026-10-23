@@ -23,6 +23,13 @@ class PreflightTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["errors"][0]["code"], "ASCENDC_ANDS_UNAVAILABLE")
 
+    def test_rejects_scalar_mask_operand(self):
+        result = preflight_candidate(
+            {"kernel.asc": "AscendC::And(dst, src, (uint16_t)0x7FFF, count);\n"}
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["errors"][0]["code"], "ASCENDC_AND_OR_SCALAR_OPERAND")
+
     def test_clean_candidate_passes(self):
         result = preflight_candidate(
             {"kernel.asc": "AscendC::GlobalTensor<int8_t> g; g.SetGlobalBuffer((__gm__ int8_t*)x, n);\n"}

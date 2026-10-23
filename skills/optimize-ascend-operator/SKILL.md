@@ -9,6 +9,7 @@ description: 根据题目合同、服务器本地测试和 CANNJudge 评测反�
 
 - `GlobalTensor<T>` 用 `SetGlobalBuffer((__gm__ T*)ptr, n)` 构造，禁止 `reinterpret_cast<GlobalTensor<T>>`。
 - 不确定某个 Ascend C API 是否存在时，先查模板注释、CANN 头文件或已验证示例；不要凭名字猜 `Ands` 之类的接口。
+- `AscendC::And/Or` 在当前版本没有 `(dst, src, scalar, count)` 重载；必须使用 LocalTensor 操作数。若要按位掩码，先构造掩码 LocalTensor，或保留父版本已验证的标量路径。不要把常量/`reinterpret_cast` 直接塞进向量 API。
 - 被 `__global__ __vector__` kernel 调用的 helper 必须标 `__aicore__`；被 host `run_kernel` 调用的 helper 必须是 host 函数，不能混用。
 - 题目合同列出的 dtype/shape 都要覆盖；不能只按样例的 int8 或某个 shape 写死。按 32B 对齐时不得越界读写真实缓冲区。
 - 没有 CANN/NPU 时，本地静态检查通过不等于远端编译通过；如实标注未验证。

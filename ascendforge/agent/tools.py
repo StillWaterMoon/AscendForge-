@@ -17,7 +17,7 @@ from ..config import Settings
 from ..db import Database
 from ..execution.capabilities import detect_capabilities
 from ..execution.executor import ExecutorError, get_executor
-from ..experiment_service import attach_attempt, ensure_active, set_working_revision
+from ..experiment_service import attach_attempt, ensure_active
 from ..experiments import (
     SnapshotError,
     add_event,
@@ -444,7 +444,9 @@ class ToolExecutor:
         if not experiment_id:
             experiment_id = ensure_active(self.db, task["id"])["id"]
             attach_attempt(self.db, experiment_id, attempt["id"])
-        set_working_revision(self.db, experiment_id, attempt["id"])
+        # Do not advance working_revision here.  A candidate is only the
+        # "working" revision after the remote compiler accepts it; otherwise a
+        # compile-error candidate would become the parent of the next attempt.
         add_event(
             self.db,
             task["id"],

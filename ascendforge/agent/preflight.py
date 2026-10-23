@@ -27,6 +27,66 @@ _RULES = (
 )
 
 
+def _call_arguments(text: str, start: int) -> list[str]:
+    depth = 0
+    args = []
+    current = []
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "(":
+            depth += 1
+            if depth == 1:
+                continue
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                args.append("".join(current).strip())
+                return args
+        elif char == "," and depth == 1:
+            args.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    return []
+
+
+def _looks_scalar(expr: str) -> bool:
+    value = expr.strip()
+    if not value:
+        return False
+    if re.search(r"\b0x[0-9a-fA-F]+\b", value):
+        return True
+    if re.search(r"^\([^)]*\)\s*[-+]?\d", value):
+        return True
+    if re.fullmatch(r"[-+]?\d+(?:\.\d+)?[uUlLfF]*", value):
+        return True
+    return False
+
+
+def _scalar_vector_operand_errors(path: str, content: str) -> list[dict[str, str]]:
+    errors = []
+    pattern = re.compile(r"\bAscendC::(And|Or)\s*\(")
+    for match in pattern.finditer(content):
+        args = _call_arguments(content, match.end() - 1)
+        if len(args) != 4:
+            continue
+        if _looks_scalar(args[2]):
+            line = content.count("\n", 0, match.start()) + 1
+            errors.append(
+                {
+                    "code": "ASCENDC_AND_OR_SCALAR_OPERAND",
+                    "path": path,
+                    "line": line,
+                    "message": (
+                        "AscendC::And/Or has no (dst, src, scalar, count) overload in the "
+                        "tested CANN version. Use three LocalTensor operands, or keep the "
+                        "parent's scalar path; do not pass a constant mask."
+                    ),
+                }
+            )
+    return errors
+
+
 def preflight_candidate(files: dict[str, str], problem: dict[str, Any] | None = None) -> dict:
     errors: list[dict[str, str]] = []
     warnings: list[str] = []
@@ -38,6 +98,7 @@ def preflight_candidate(files: dict[str, str], problem: dict[str, Any] | None = 
             if match:
                 line = content.count("\n", 0, match.start()) + 1
                 errors.append({"code": code, "path": path, "line": line, "message": message})
+        errors.extend(_scalar_vector_operand_errors(path, content))
 
     text = "\n".join(files.values())
     dtype_tokens = {

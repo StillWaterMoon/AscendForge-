@@ -33,22 +33,18 @@ def derive_active_strategy(task: dict, attempts: list[dict]) -> dict:
     latest = _latest_with_result(attempts or [])
     best_id = task.get("best_attempt_id")
     best = next((a for a in (attempts or []) if a.get("id") == best_id), None)
-    if best_id:
-        best_ordinal = best.get("ordinal") if best else "?"
-        text = (
-            f"当前阶段：性能优化。已有通过验证的 best（attempt #{best_ordinal}）。\n"
-            "保持完整正确性、接口和 dtype 覆盖；先测当前 best 基线，再每轮只改一个主要因素"
-            "（分块、搬运、并行、同步、融合等）。性能退化或不可比的结果不能覆盖 best；"
-            "只有真实、可比的测量才更新 best。"
-        )
-        return {
-            "phase": "performance",
-            "text": text,
-            "based_on_attempt": best_id,
-            "latest_attempt": latest.get("ordinal") if latest else None,
-        }
-
     if not latest:
+        if best_id:
+            best_ordinal = best.get("ordinal") if best else "?"
+            return {
+                "phase": "performance",
+                "text": (
+                    f"当前阶段：性能优化。已有通过验证的 best（attempt #{best_ordinal}）。"
+                    "保持正确性和接口不变；先测 best 基线，再每轮只改一个主要因素。"
+                ),
+                "based_on_attempt": best_id,
+                "latest_attempt": None,
+            }
         return {
             "phase": "baseline",
             "text": (
@@ -65,6 +61,20 @@ def derive_active_strategy(task: dict, attempts: list[dict]) -> dict:
     passed = normalized.get("testcase_passed")
     total = normalized.get("testcase_total")
     precision = normalized.get("precision_ratio")
+    if outcome == "passed" and best_id:
+        best_ordinal = best.get("ordinal") if best else "?"
+        return {
+            "phase": "performance",
+            "text": (
+                f"当前阶段：性能优化。最新 attempt #{ordinal} 已通过，best 为 attempt #{best_ordinal}。"
+                "保持完整正确性、接口和 dtype 覆盖；先测当前 best 基线，再每轮只改一个主要因素"
+                "（分块、搬运、并行、同步、融合等）。性能退化或不可比的结果不能覆盖 best；"
+                "只有真实、可比的测量才更新 best。若某个向量 API 的重载没有经过验证，"
+                "不要凭签名猜；保留父版本的标量路径，先做 tile/并行度等低风险改动。"
+            ),
+            "based_on_attempt": best_id,
+            "latest_attempt": ordinal,
+        }
     if outcome == "compile_error":
         text = (
             f"当前阶段：编译修复。最新 attempt #{ordinal} 是编译错误。"

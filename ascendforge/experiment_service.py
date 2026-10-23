@@ -16,7 +16,7 @@ from typing import Any
 
 from .db import Database
 from .experiments import add_event
-from .util import json_dumps, new_id, now
+from .util import json_dumps, json_loads, new_id, now
 
 ACTIVE_STATUSES = ("active", "baseline_building")
 TERMINAL_STATUSES = ("completed", "abandoned")
@@ -181,12 +181,37 @@ def finish_experiment(db: Database, experiment_id: str, *, status: str = "comple
     )
 
 
+def _perf(db: Database, attempt_id: str | None) -> dict | None:
+    if not attempt_id:
+        return None
+    row = db.query_one("SELECT normalized_json FROM attempts WHERE id=?", (attempt_id,))
+    if not row:
+        return None
+    normalized = json_loads(row.get("normalized_json"), {})
+    values = []
+    for value in normalized.get("time_values") or []:
+        try:
+            values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    return {
+        "attempt_id": attempt_id,
+        "samples": len(values),
+        "max": max(values),
+        "avg": sum(values) / len(values),
+        "min": min(values),
+    }
+
+
 def current_context(db: Database, task_id: str) -> dict:
     experiment = active_experiment(db, task_id)
     if not experiment:
         experiment = latest_experiment(db, task_id)
     if not experiment:
         return {}
+    task = _task(db, task_id)
     return {
         "id": experiment["id"],
         "ordinal": experiment["ordinal"],
@@ -198,4 +223,7 @@ def current_context(db: Database, task_id: str) -> dict:
         "started_at": experiment.get("started_at"),
         "finished_at": experiment.get("finished_at"),
         "conclusion": experiment.get("conclusion_json"),
+        "baseline_perf": _perf(db, experiment.get("baseline_attempt_id")),
+        "experiment_best_perf": _perf(db, experiment.get("experiment_best_id")),
+        "global_best_perf": _perf(db, task.get("best_attempt_id") if task else None),
     }

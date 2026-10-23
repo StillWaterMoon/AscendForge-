@@ -15,7 +15,7 @@ from typing import Any
 
 from .config import Settings
 from .db import Database
-from .experiment_service import note_result
+from .experiment_service import note_result, set_working_revision
 from .experiments import (
     add_event,
     attempt_history,
@@ -736,6 +736,15 @@ class Scheduler:
                     ),
                     current,
                 ),
+            )
+        if submission.get("experiment_id") and outcome in ("passed", "failed"):
+            # A compile/runtime/unknown result does not advance the working
+            # revision.  Only a candidate the remote compiler accepted may
+            # become the parent of the next revision.
+            set_working_revision(
+                self.db,
+                submission["experiment_id"],
+                submission["attempt_id"],
             )
         if normalized.get("all_passed"):
             update_remote_best(self.db, submission["task_id"], submission["attempt_id"], normalized, config)
