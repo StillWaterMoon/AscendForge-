@@ -17,6 +17,7 @@ from ..config import Settings
 from ..db import Database
 from ..execution.capabilities import detect_capabilities
 from ..execution.executor import ExecutorError, get_executor
+from ..experiment_service import attach_attempt, ensure_active, set_working_revision
 from ..experiments import (
     SnapshotError,
     add_event,
@@ -439,6 +440,11 @@ class ToolExecutor:
         if parent:
             fields["parent_attempt_id"] = parent
         update_attempt(self.db, attempt["id"], **fields)
+        experiment_id = attempt.get("experiment_id")
+        if not experiment_id:
+            experiment_id = ensure_active(self.db, task["id"])["id"]
+            attach_attempt(self.db, experiment_id, attempt["id"])
+        set_working_revision(self.db, experiment_id, attempt["id"])
         add_event(
             self.db,
             task["id"],

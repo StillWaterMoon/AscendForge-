@@ -667,6 +667,13 @@ async function renderTask(taskId) {
       <button class="btn btn-sm btn-ghost" data-message="1" type="button">给 Agent 留言</button>
     </div>
 
+    ${task.experiment?.id ? `<div class="experiment-strip">
+      <span class="experiment-title">实验 #${esc(task.experiment.ordinal)} <span class="faint">${esc(task.experiment.status)}</span></span>
+      <span>baseline <b class="mono">${esc(String(task.experiment.baseline_attempt_id || '—').slice(0, 12))}</b></span>
+      <span>working <b class="mono">${esc(String(task.experiment.working_attempt_id || '—').slice(0, 12))}</b></span>
+      <span>experiment best <b class="mono">${esc(String(task.experiment.experiment_best_id || '—').slice(0, 12))}</b></span>
+    </div>` : ''}
+
     <div class="grid grid-4" style="margin-bottom:16px">
       <div class="metric"><div class="metric-label">远端最好</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '仅通过且可比的远端结果' : '暂无')}</div></div>
       <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">尝试上限 ${esc(config.max_attempts ?? '—')} · 提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>

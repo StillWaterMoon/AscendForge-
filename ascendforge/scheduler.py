@@ -15,6 +15,7 @@ from typing import Any
 
 from .config import Settings
 from .db import Database
+from .experiment_service import note_result
 from .experiments import (
     add_event,
     attempt_history,
@@ -240,7 +241,7 @@ class Scheduler:
             ).fetchone()
             conn.execute(
                 "INSERT INTO submissions(id, task_id, attempt_id, snapshot_id, state, request_hash, "
-                "created_at, updated_at, next_poll_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "experiment_id, created_at, updated_at, next_poll_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     submission_id,
                     task_id,
@@ -248,6 +249,7 @@ class Scheduler:
                     attempt["snapshot_id"],
                     SUBMISSION_QUEUED,
                     snapshot_row["sha256"] if snapshot_row else None,
+                    attempt.get("experiment_id"),
                     current,
                     current,
                     None,
@@ -737,6 +739,13 @@ class Scheduler:
             )
         if normalized.get("all_passed"):
             update_remote_best(self.db, submission["task_id"], submission["attempt_id"], normalized, config)
+            if submission.get("experiment_id"):
+                note_result(
+                    self.db,
+                    submission["experiment_id"],
+                    submission["attempt_id"],
+                    normalized,
+                )
         self.tasks.set_next_action(submission["task_id"], current)
         self._evaluate_stop(submission["task_id"])
 

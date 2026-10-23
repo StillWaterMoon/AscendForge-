@@ -35,6 +35,7 @@ from .agent.prompts import system_prompt
 from .agent.protocol import TOOLS
 from .agent.runtime import SKILLS_FOR_OPTIMIZATION
 from .agent.strategy import derive_active_strategy
+from .experiment_service import current_context
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
 from .backup import BackupError, create_backup, list_backups, verify_backup
@@ -722,6 +723,7 @@ class Handler(BaseHTTPRequestHandler):
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
         detail["active_strategy"] = derive_active_strategy(detail, detail.get("attempts") or [])
+        detail["experiment"] = current_context(self.app.db, task_id)
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()

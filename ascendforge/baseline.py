@@ -12,6 +12,7 @@ import json
 
 from .config import Settings
 from .db import Database
+from .experiment_service import ensure_active
 from .experiments import add_event, attach_snapshot, create_attempt, update_attempt
 from .platform.cannjudge import CannjudgeAdapter
 from .scheduler import Scheduler
@@ -59,9 +60,11 @@ def create_baseline_submission(
         "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
         (json.dumps(config, ensure_ascii=False, separators=(",", ":")), now(), task_id),
     )
+    experiment = ensure_active(db, task_id)
     attempt = create_attempt(
         db,
         task_id,
+        experiment_id=experiment["id"],
         provider="manual",
         model="manual-baseline",
         prompt_version="manual-baseline",
@@ -77,6 +80,11 @@ def create_baseline_submission(
         db,
         attempt["id"],
         hypothesis="人工基线：直接提交题目模板的可编辑文件，验证真实提交/结果链路；不使用模型",
+    )
+    db.execute(
+        "UPDATE experiments SET baseline_attempt_id=COALESCE(baseline_attempt_id, ?), "
+        "working_attempt_id=?, updated_at=? WHERE id=?",
+        (attempt["id"], attempt["id"], now(), experiment["id"]),
     )
     add_event(
         db,

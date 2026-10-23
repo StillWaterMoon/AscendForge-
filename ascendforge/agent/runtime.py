@@ -50,6 +50,7 @@ from .protocol import (
 )
 from .providers import ModelConfig, ProviderError, ProviderResponse, make_provider
 from .skills import SkillError, SkillRegistry
+from ..experiment_service import attach_attempt, current_context, ensure_active
 from .tools import ToolExecutor
 
 log = logging.getLogger(__name__)
@@ -309,34 +310,74 @@ class AgentRuntime:
         return config
 
     def _select_attempt(self, task: dict, config: ModelConfig) -> dict | None:
+        experiment = ensure_active(self.db, task["id"])
         latest = current_attempt(self.db, task["id"])
-        if latest and latest["status"] in ATTEMPT_BLOCKING_AGENT:
-            return latest
-        if latest and latest["status"] in ATTEMPT_TERMINAL:
-            parent = task.get("best_attempt_id") or latest["id"]
+        if latest and latest.get("experiment_id") not in (None, experiment["id"]):
+            # The latest row belongs to a legacy or previous experiment.  Do not
+            # silently relabel it; start a new revision from this experiment's
+            # fixed baseline/working version.
+            parent = (
+                experiment.get("working_attempt_id")
+                or experiment.get("baseline_attempt_id")
+                or task.get("best_attempt_id")
+            )
             return create_attempt(
                 self.db,
                 task["id"],
                 parent_attempt_id=parent,
+                experiment_id=experiment["id"],
+                provider=config.provider,
+                model=config.model,
+                prompt_version=self._prompt_version(),
+            )
+        if latest and latest["status"] in ATTEMPT_BLOCKING_AGENT:
+            if not latest.get("experiment_id"):
+                attach_attempt(self.db, experiment["id"], latest["id"])
+            return latest
+        if latest and latest["status"] in ATTEMPT_TERMINAL:
+            # Inside an experiment, the next revision starts from the working
+            # revision, not from the global best.  A fresh experiment fixes its
+            # baseline when it is created.
+            parent = (
+                experiment.get("working_attempt_id")
+                or experiment.get("baseline_attempt_id")
+                or task.get("best_attempt_id")
+                or latest["id"]
+            )
+            return create_attempt(
+                self.db,
+                task["id"],
+                parent_attempt_id=parent,
+                experiment_id=experiment["id"],
                 provider=config.provider,
                 model=config.model,
                 prompt_version=self._prompt_version(),
             )
         if latest and latest["status"] in ("generated", "local_checking"):
+            if not latest.get("experiment_id"):
+                attach_attempt(self.db, experiment["id"], latest["id"])
             return latest
         if latest is None:
             return create_attempt(
                 self.db,
                 task["id"],
+                experiment_id=experiment["id"],
                 provider=config.provider,
                 model=config.model,
                 prompt_version=self._prompt_version(),
             )
         if latest["status"] == ATTEMPT_FAILED:
+            parent = (
+                experiment.get("working_attempt_id")
+                or experiment.get("baseline_attempt_id")
+                or task.get("best_attempt_id")
+                or latest["id"]
+            )
             return create_attempt(
                 self.db,
                 task["id"],
-                parent_attempt_id=task.get("best_attempt_id") or latest["id"],
+                parent_attempt_id=parent,
+                experiment_id=experiment["id"],
                 provider=config.provider,
                 model=config.model,
                 prompt_version=self._prompt_version(),
@@ -470,6 +511,7 @@ class AgentRuntime:
                 parent_attempt=parent_attempt,
                 parent_result=parent_result,
                 parent_raw=parent_raw,
+                experiment=current_context(self.db, task["id"]),
                 capabilities={
                     "npu": capabilities.get("npu"),
                     "candidate_execution": capabilities.get("candidate_execution"),

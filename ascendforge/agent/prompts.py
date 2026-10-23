@@ -248,6 +248,7 @@ def context_prompt(
     parent_attempt: dict | None = None,
     parent_result: dict | None = None,
     parent_raw: dict | None = None,
+    experiment: dict | None = None,
     capabilities: dict | None = None,
 ) -> str:
     config = task.get("config") or {}
@@ -315,6 +316,20 @@ code_template: {problem.get('code_template')}
 
 ## Template files
 {_template_files(template)}
+
+## Current experiment
+experiment_id: {(experiment or {}).get('id') or '(none)'}
+status: {(experiment or {}).get('status') or '(not started)'}
+ordinal: {(experiment or {}).get('ordinal') or '—'}
+hypothesis: {(experiment or {}).get('hypothesis') or '(not recorded)'}
+baseline_attempt: {(experiment or {}).get('baseline_attempt_id') or '(none)'}
+working_attempt: {(experiment or {}).get('working_attempt_id') or '(none)'}
+experiment_best: {(experiment or {}).get('experiment_best_id') or '(none)'}
+global_best: {task.get('best_attempt_id') or '(none)'}
+
+A revision belongs to the current experiment. Start from the working revision
+when continuing this experiment; a new experiment starts from the global best.
+The baseline stays fixed for the lifetime of the experiment.
 
 ## Experiment history (newest first)
 {_history(attempts, current_id=attempt.get('id'))}

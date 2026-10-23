@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -97,6 +97,26 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status_next ON tasks(status, next_action_at);
 
+CREATE TABLE IF NOT EXISTS experiments (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    hypothesis TEXT,
+    plan_json TEXT,
+    params_json TEXT,
+    baseline_attempt_id TEXT,
+    working_attempt_id TEXT,
+    experiment_best_id TEXT,
+    conclusion_json TEXT,
+    started_at REAL,
+    finished_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_experiments_task ON experiments(task_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_experiments_status ON experiments(task_id, status);
+
 CREATE TABLE IF NOT EXISTS attempts (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
@@ -119,6 +139,13 @@ CREATE TABLE IF NOT EXISTS attempts (
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     cost_estimate REAL,
     step_count INTEGER NOT NULL DEFAULT 0,
+    experiment_id TEXT,
+    revision_kind TEXT,
+    config_json TEXT,
+    base_snapshot_sha TEXT,
+    diff_sha TEXT,
+    edit_mode TEXT,
+    changed_files_json TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     finished_at REAL
@@ -172,6 +199,11 @@ CREATE TABLE IF NOT EXISTS submissions (
     reconciled_at REAL,
     poll_count INTEGER NOT NULL DEFAULT 0,
     next_poll_at REAL,
+    experiment_id TEXT,
+    evaluation_id TEXT,
+    eval_key TEXT,
+    replicate_of TEXT,
+    reused INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     resolved_by TEXT,
@@ -182,6 +214,24 @@ CREATE INDEX IF NOT EXISTS idx_submissions_task ON submissions(task_id, created_
 CREATE INDEX IF NOT EXISTS idx_submissions_sent ON submissions(sent_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_remote ON submissions(remote_id)
     WHERE remote_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS evaluations (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT,
+    task_id TEXT NOT NULL,
+    attempt_id TEXT,
+    kind TEXT NOT NULL,
+    config_json TEXT,
+    environment_json TEXT,
+    result_json TEXT,
+    eval_key TEXT,
+    reused INTEGER NOT NULL DEFAULT 0,
+    replicate_of TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evaluations_task ON evaluations(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evaluations_experiment ON evaluations(experiment_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evaluations_key ON evaluations(task_id, eval_key);
 
 CREATE TABLE IF NOT EXISTS model_calls (
     id TEXT PRIMARY KEY,
@@ -268,6 +318,7 @@ class Database:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.executescript(SCHEMA)
+                self._migrate(conn)
                 conn.execute(
                     "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -282,6 +333,40 @@ class Database:
             finally:
                 conn.close()
         raise RuntimeError(f"database initialization did not complete: {last}")
+
+    @staticmethod
+    def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Idempotent additive migrations for existing data directories.
+
+        Keep historical IDs and attempt/submission rows intact.  New columns are
+        nullable; the experiment service assigns legacy rows lazily.
+        """
+        additions = {
+            "attempts": {
+                "experiment_id": "TEXT",
+                "revision_kind": "TEXT",
+                "config_json": "TEXT",
+                "base_snapshot_sha": "TEXT",
+                "diff_sha": "TEXT",
+                "edit_mode": "TEXT",
+                "changed_files_json": "TEXT",
+            },
+            "submissions": {
+                "experiment_id": "TEXT",
+                "evaluation_id": "TEXT",
+                "eval_key": "TEXT",
+                "replicate_of": "TEXT",
+                "reused": "INTEGER NOT NULL DEFAULT 0",
+            },
+        }
+        for table, columns in additions.items():
+            existing = self._columns(conn, table)
+            for name, definition in columns.items():
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     @contextmanager
     def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:

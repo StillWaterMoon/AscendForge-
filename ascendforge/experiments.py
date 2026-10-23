@@ -189,6 +189,7 @@ def create_attempt(
     task_id: str,
     *,
     parent_attempt_id: str | None = None,
+    experiment_id: str | None = None,
     provider: str | None = None,
     model: str | None = None,
     prompt_version: str = "v1",
@@ -200,13 +201,30 @@ def create_attempt(
         attempt_id = new_id("att")
         current = now()
         conn.execute(
-            "INSERT INTO attempts(id, task_id, ordinal, parent_attempt_id, status, provider, model, "
-            "prompt_version, created_at, updated_at) VALUES(?, ?, ?, ?, 'generated', ?, ?, ?, ?, ?)",
-            (attempt_id, task_id, ordinal, parent_attempt_id, provider, model, prompt_version, current, current),
+            "INSERT INTO attempts(id, task_id, ordinal, parent_attempt_id, experiment_id, status, provider, model, "
+            "prompt_version, created_at, updated_at) VALUES(?, ?, ?, ?, ?, 'generated', ?, ?, ?, ?, ?)",
+            (
+                attempt_id,
+                task_id,
+                ordinal,
+                parent_attempt_id,
+                experiment_id,
+                provider,
+                model,
+                prompt_version,
+                current,
+                current,
+            ),
         )
     row = db.query_one("SELECT * FROM attempts WHERE id=?", (attempt_id,))
     assert row is not None
-    add_event(db, task_id, attempt_id, "attempt_created", {"ordinal": ordinal, "parent": parent_attempt_id})
+    add_event(
+        db,
+        task_id,
+        attempt_id,
+        "attempt_created",
+        {"ordinal": ordinal, "parent": parent_attempt_id, "experiment_id": experiment_id},
+    )
     return row
 
 
