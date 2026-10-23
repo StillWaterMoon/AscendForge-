@@ -119,7 +119,11 @@ def ensure_active(db: Database, task_id: str) -> dict:
     if not task:
         raise KeyError(f"task not found: {task_id}")
     ensure_legacy(db, task_id)
-    baseline = task.get("best_attempt_id") or _best_snapshot(db, task_id)
+    baseline = (
+        task.get("performance_best_attempt_id")
+        or task.get("best_attempt_id")
+        or _best_snapshot(db, task_id)
+    )
     current_time = now()
     experiment_id = new_id("exp")
     ordinal = _next_ordinal(db, task_id)

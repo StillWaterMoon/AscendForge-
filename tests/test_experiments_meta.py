@@ -190,6 +190,19 @@ class ExperimentServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["status"], "abandoned")
         self.assertEqual(refreshed["stop_reason"], "budget:max_attempts")
 
+    def test_new_experiment_prefers_performance_best_baseline(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-performance-baseline-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="paused")
+        correctness = seed_attempt(env, task, source="// correctness")
+        faster = seed_attempt(env, task, source="// faster")
+        env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=? WHERE id=?",
+            (correctness["id"], faster["id"], task["id"]),
+        )
+        experiment = ensure_active(env.db, task["id"])
+        self.assertEqual(experiment["baseline_attempt_id"], faster["id"])
+
     def test_no_attempts_means_no_legacy_group(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-experiment-empty-"))
         env = make_env(tmp)
