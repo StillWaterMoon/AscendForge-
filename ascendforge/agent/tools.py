@@ -448,6 +448,18 @@ class ToolExecutor:
         )
         fields = {"hypothesis": hypothesis[:4000]}
         if parent:
+            if parent != attempt.get("parent_attempt_id"):
+                add_event(
+                    self.db,
+                    task["id"],
+                    attempt["id"],
+                    "attempt_parent_rebound",
+                    {
+                        "from": attempt.get("parent_attempt_id"),
+                        "to": parent,
+                        "reason": "create_candidate explicitly selected its base",
+                    },
+                )
             fields["parent_attempt_id"] = parent
             base = self.db.query_one(
                 "SELECT sha256 FROM snapshots WHERE id=?",
