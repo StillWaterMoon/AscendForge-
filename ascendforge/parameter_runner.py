@@ -406,6 +406,75 @@ class ParameterRunner:
             raw=raw,
         )
 
+    def _apply_retest_policy(self) -> dict:
+        """Retest configs whose measurements are close to the sweep's best."""
+        criteria = json_loads(self.experiment.get("success_criteria_json"), {})
+        threshold = criteria.get("repeat_if_within_pct")
+        if threshold is None:
+            return {"threshold_pct": None, "retested": [], "missing": []}
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError):
+            return {"threshold_pct": None, "retested": [], "missing": []}
+        primary = [
+            result
+            for result in self.results
+            if result.get("kind") == "parameter" and result.get("all_passed") and result.get("time_values")
+        ]
+        if not primary:
+            return {"threshold_pct": threshold, "retested": [], "missing": []}
+        best = min(max(result["time_values"]) for result in primary)
+        needed = []
+        for result in primary:
+            value = max(result["time_values"])
+            delta = abs(value - best) / best * 100 if best else 0
+            if delta <= threshold:
+                needed.append(result)
+        retested = []
+        missing = []
+        for result in needed:
+            config_id = result["config_id"]
+            already = any(
+                item.get("kind") == "retest" and item.get("config_id") == config_id
+                for item in self.results
+            )
+            if already:
+                retested.append(config_id)
+                continue
+            if self.max_revisions is not None and self.revisions >= self.max_revisions:
+                self.stop_reason = "budget_exhausted"
+                missing.append(config_id)
+                continue
+            attempt = get_attempt(self.db, result["attempt_id"])
+            if not attempt or not attempt.get("snapshot_id"):
+                missing.append(config_id)
+                continue
+            try:
+                files = read_snapshot(self.db, self.settings, attempt["snapshot_id"])["files"]
+                config = {"id": config_id, "params": result["params"], "raw": {}}
+                retest = self._evaluate(
+                    config,
+                    files,
+                    "retest",
+                    force=True,
+                    replicate_of=result["evaluation_id"],
+                )
+                if retest["all_passed"]:
+                    retested.append(config_id)
+                else:
+                    missing.append(config_id)
+            except (ParameterRunnerError, SnapshotError):
+                missing.append(config_id)
+        return {"threshold_pct": threshold, "retested": retested, "missing": missing}
+
+    def _choose_best_result(self) -> dict | None:
+        candidates = []
+        for result in self.results:
+            values = [float(value) for value in (result.get("time_values") or []) if value is not None]
+            if result.get("all_passed") and values:
+                candidates.append((max(values), result))
+        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
     # -- orchestration -------------------------------------------------
     def run(self) -> dict:
         configs = self.configs()
@@ -461,11 +530,24 @@ class ParameterRunner:
                     self.stop_reason = "budget_exhausted"
                     break
 
+        retest_policy = {}
+        if not self.stop_reason:
+            retest_policy = self._apply_retest_policy()
+            if retest_policy.get("missing"):
+                required_retests.update(retest_policy["missing"])
         if not self.stop_reason:
             if required_retests:
                 self.stop_reason = "retest_incomplete"
             elif failed:
                 self.stop_reason = "config_failed"
+        best_result = self._choose_best_result()
+        experiment_best_id = best_result["attempt_id"] if best_result else None
+        if experiment_best_id:
+            self.db.execute(
+                "UPDATE experiments SET experiment_best_id=?, updated_at=? WHERE id=?",
+                (experiment_best_id, now(), self.experiment_id),
+            )
+            set_working_revision(self.db, self.experiment_id, experiment_best_id)
         verification_complete = (
             self.stop_reason is None
             and not failed
@@ -481,6 +563,8 @@ class ParameterRunner:
             "stop_reason": self.stop_reason,
             "evaluations": self.evaluations,
             "evaluator_calls": self.evaluator_calls,
+            "experiment_best_attempt_id": experiment_best_id,
+            "retest_policy": retest_policy,
         }
         finish_experiment(
             self.db,

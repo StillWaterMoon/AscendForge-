@@ -175,7 +175,9 @@ def note_result(db: Database, experiment_id: str, attempt_id: str, normalized: d
         return False
     baseline = _perf(db, experiment.get("baseline_attempt_id"))
     candidate = _perf(db, attempt_id)
-    if baseline and candidate and candidate["max"] >= baseline["max"]:
+    # Equal performance is still a valid experiment best (often the fixed
+    # baseline control); only a strictly slower pass is rejected.
+    if baseline and candidate and candidate["max"] > baseline["max"]:
         return False
     db.execute(
         "UPDATE experiments SET experiment_best_id=?, updated_at=? WHERE id=?",

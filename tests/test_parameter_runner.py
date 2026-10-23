@@ -44,7 +44,7 @@ class SimulatedEvaluator:
         }
 
 
-def make_experiment(env, task, *, retest=None, budget=None, configs=None):
+def make_experiment(env, task, *, retest=None, budget=None, configs=None, criteria=None):
     baseline = seed_attempt(env, task, source=SOURCE)
     env.db.execute(
         "UPDATE attempts SET normalized_json=? WHERE id=?",
@@ -69,7 +69,7 @@ def make_experiment(env, task, *, retest=None, budget=None, configs=None):
             ],
             "retest": retest or [],
         },
-        success_criteria={"all_passed": True},
+        success_criteria=criteria or {"all_passed": True},
         budget=budget or {"max_revisions": 8, "max_evaluations": 8},
     )
     return baseline, experiment
@@ -108,6 +108,8 @@ class ParameterRunnerTests(unittest.TestCase):
         evals = self.env.db.query("SELECT * FROM evaluations WHERE experiment_id=? ORDER BY created_at", (experiment["id"],))
         self.assertEqual(len(evals), 4)
         self.assertTrue(all(row["result_json"] for row in evals))
+        exp = self.env.db.query_one("SELECT experiment_best_id FROM experiments WHERE id=?", (experiment["id"],))
+        self.assertTrue(exp["experiment_best_id"])
 
     def test_reuses_identical_evaluation(self):
         baseline, experiment = make_experiment(self.env, self.task)
@@ -153,6 +155,22 @@ class ParameterRunnerTests(unittest.TestCase):
         )
         self.assertEqual(len(retests), 1)
         self.assertTrue(retests[0]["replicate_of"])
+
+    def test_near_best_configs_are_retested(self):
+        _, experiment = make_experiment(
+            self.env,
+            self.task,
+            criteria={"all_passed": True, "repeat_if_within_pct": 1},
+            budget={"max_revisions": 6, "max_evaluations": 6},
+        )
+        evaluator = SimulatedEvaluator()
+        result = ParameterRunner(self.env.db, self.env.settings, self.task["id"], experiment["id"], evaluator).run()
+        self.assertEqual(result["status"], "completed")
+        retests = self.env.db.query(
+            "SELECT * FROM evaluations WHERE experiment_id=? AND kind='retest'", (experiment["id"],)
+        )
+        self.assertGreaterEqual(len(retests), 1)
+        self.assertTrue(all(row["replicate_of"] for row in retests))
 
     def test_budget_exhaustion_is_incomplete(self):
         _, experiment = make_experiment(self.env, self.task, budget={"max_revisions": 2, "max_evaluations": 4})
