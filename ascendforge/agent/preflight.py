@@ -60,6 +60,10 @@ def _looks_scalar(expr: str) -> bool:
         return True
     if re.fullmatch(r"[-+]?\d+(?:\.\d+)?[uUlLfF]*", value):
         return True
+    # A bitwise-not of a scalar mask, e.g. (T)(~signMask), is still a scalar
+    # operand; it cannot satisfy the LocalTensor overload.
+    if "~" in value and "Tensor" not in value:
+        return True
     return False
 
 

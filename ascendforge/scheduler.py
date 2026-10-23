@@ -737,10 +737,8 @@ class Scheduler:
                     current,
                 ),
             )
-        if submission.get("experiment_id") and outcome in ("passed", "failed"):
-            # A compile/runtime/unknown result does not advance the working
-            # revision.  Only a candidate the remote compiler accepted may
-            # become the parent of the next revision.
+        if submission.get("experiment_id") and outcome == "failed":
+            # A compilable-but-wrong candidate is useful for the next repair.
             set_working_revision(
                 self.db,
                 submission["experiment_id"],
@@ -749,12 +747,21 @@ class Scheduler:
         if normalized.get("all_passed"):
             update_remote_best(self.db, submission["task_id"], submission["attempt_id"], normalized, config)
             if submission.get("experiment_id"):
-                note_result(
+                improved = note_result(
                     self.db,
                     submission["experiment_id"],
                     submission["attempt_id"],
                     normalized,
                 )
+                # A pass that is not faster than the fixed baseline must not
+                # replace the working revision; otherwise the Agent would
+                # optimize a slower candidate on the next round.
+                if improved:
+                    set_working_revision(
+                        self.db,
+                        submission["experiment_id"],
+                        submission["attempt_id"],
+                    )
         self.tasks.set_next_action(submission["task_id"], current)
         self._evaluate_stop(submission["task_id"])
 

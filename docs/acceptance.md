@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **82 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **83 passed**
 
 状态含义：
 

@@ -55,6 +55,29 @@ class ExperimentServiceTests(unittest.TestCase):
         refreshed = active_experiment(env.db, task["id"])
         self.assertEqual(refreshed["experiment_best_id"], revision["id"])
 
+    def test_slower_passing_candidate_does_not_replace_experiment_best(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-experiment-slower-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        baseline = seed_attempt(env, task, source="// baseline")
+        env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, best_metric_json=? WHERE id=?",
+            (baseline["id"], "{}", task["id"]),
+        )
+        experiment = ensure_active(env.db, task["id"])
+        candidate = seed_attempt(env, task, parent=baseline["id"], source="// slower")
+        env.db.execute(
+            "UPDATE attempts SET experiment_id=?, normalized_json=? WHERE id=?",
+            (experiment["id"], '{"all_passed": true, "time_values": [30, 40]}', candidate["id"]),
+        )
+        env.db.execute(
+            "UPDATE attempts SET normalized_json=? WHERE id=?",
+            ('{"all_passed": true, "time_values": [10, 20]}', baseline["id"]),
+        )
+        self.assertFalse(note_result(env.db, experiment["id"], candidate["id"], {"all_passed": True}))
+        refreshed = active_experiment(env.db, task["id"])
+        self.assertIsNone(refreshed["experiment_best_id"])
+
     def test_no_attempts_means_no_legacy_group(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-experiment-empty-"))
         env = make_env(tmp)

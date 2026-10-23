@@ -161,17 +161,27 @@ def set_working_revision(db: Database, experiment_id: str, attempt_id: str) -> N
     )
 
 
-def note_result(db: Database, experiment_id: str, attempt_id: str, normalized: dict) -> None:
-    """Update experiment best only from a real, fully passing remote result."""
+def note_result(db: Database, experiment_id: str, attempt_id: str, normalized: dict) -> bool:
+    """Update experiment best only from a real, fully passing remote result.
+
+    During performance optimization a passing-but-slower candidate must not
+    become the experiment best.  The fixed baseline is the comparator; when no
+    comparable timing exists, a passing result is accepted.
+    """
     if not normalized.get("all_passed"):
-        return
+        return False
     experiment = db.query_one("SELECT * FROM experiments WHERE id=?", (experiment_id,))
     if not experiment:
-        return
+        return False
+    baseline = _perf(db, experiment.get("baseline_attempt_id"))
+    candidate = _perf(db, attempt_id)
+    if baseline and candidate and candidate["max"] >= baseline["max"]:
+        return False
     db.execute(
         "UPDATE experiments SET experiment_best_id=?, updated_at=? WHERE id=?",
         (attempt_id, now(), experiment_id),
     )
+    return True
 
 
 def finish_experiment(db: Database, experiment_id: str, *, status: str = "completed", conclusion: dict | None = None) -> None:
