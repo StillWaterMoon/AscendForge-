@@ -173,6 +173,21 @@ def note_result(db: Database, experiment_id: str, attempt_id: str, normalized: d
     experiment = db.query_one("SELECT * FROM experiments WHERE id=?", (experiment_id,))
     if not experiment:
         return False
+    if not experiment.get("baseline_attempt_id"):
+        # Baseline-building: the first fully verified candidate becomes the
+        # fixed baseline, working revision and initial experiment best.
+        db.execute(
+            "UPDATE experiments SET baseline_attempt_id=?, working_attempt_id=?, experiment_best_id=?, updated_at=? WHERE id=?",
+            (attempt_id, attempt_id, attempt_id, now(), experiment_id),
+        )
+        add_event(
+            db,
+            experiment["task_id"],
+            attempt_id,
+            "experiment_baseline_established",
+            {"experiment_id": experiment_id, "attempt_id": attempt_id},
+        )
+        return True
     baseline = _perf(db, experiment.get("baseline_attempt_id"))
     candidate = _perf(db, attempt_id)
     # Equal performance is still a valid experiment best (often the fixed

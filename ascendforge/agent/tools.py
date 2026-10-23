@@ -17,7 +17,13 @@ from ..config import Settings
 from ..db import Database
 from ..execution.capabilities import detect_capabilities
 from ..execution.executor import ExecutorError, get_executor
-from ..experiment_service import attach_attempt, ensure_active
+from ..experiment_service import (
+    active_experiment,
+    attach_attempt,
+    ensure_active,
+    finish_experiment,
+    start_experiment,
+)
 from ..experiments import (
     SnapshotError,
     add_event,
@@ -153,6 +159,8 @@ class ToolExecutor:
             "run_local_validation": self._run_local_validation,
             "request_submission": self._request_submission,
             "query_result": self._query_result,
+            "start_experiment": self._start_experiment,
+            "finish_experiment": self._finish_experiment,
             "finish_task": self._finish_task,
         }
         handler = handlers.get(action.tool_name)
@@ -762,6 +770,56 @@ class ToolExecutor:
             "raw": raw,
             "note": "Host-side state only. The scheduler polls CANNJudge; do not assume a result before state=finished.",
         }
+
+    def _start_experiment(self, task: dict, attempt: dict, arguments: dict) -> dict:
+        self._require_running(task)
+        hypothesis = str(arguments.get("hypothesis") or "").strip()
+        if not hypothesis:
+            raise ToolFailure("BAD_HYPOTHESIS", "hypothesis is required", retryable=False)
+        experiment = start_experiment(
+            self.db,
+            task["id"],
+            hypothesis=hypothesis,
+            baseline_attempt_id=str(arguments.get("baseline_attempt_id") or "").strip() or None,
+            search_space=arguments.get("search_space") or {},
+            success_criteria=arguments.get("success_criteria") or {},
+            budget=arguments.get("budget") or {},
+            actor="agent",
+        )
+        return {
+            "experiment_id": experiment["id"],
+            "ordinal": experiment["ordinal"],
+            "status": experiment["status"],
+            "baseline_attempt_id": experiment.get("baseline_attempt_id"),
+            "note": "The next attempt will start from this fixed baseline. Do not claim success from the hypothesis alone.",
+        }
+
+    def _finish_experiment(self, task: dict, attempt: dict, arguments: dict) -> dict:
+        self._require_running(task)
+        experiment = active_experiment(self.db, task["id"])
+        if not experiment:
+            raise ToolFailure("NO_ACTIVE_EXPERIMENT", "there is no active experiment", retryable=False)
+        status = str(arguments.get("status") or "abandoned")
+        summary = str(arguments.get("summary") or "").strip()
+        if status not in ("completed", "abandoned"):
+            raise ToolFailure("BAD_EXPERIMENT_STATUS", "status must be completed or abandoned", retryable=False)
+        if not summary:
+            raise ToolFailure("BAD_SUMMARY", "summary is required", retryable=False)
+        conclusion = {
+            "status": "completed" if status == "completed" else "incomplete",
+            "verified": False,
+            "agent_summary": summary[:4000],
+            "experiment_best_attempt_id": experiment.get("experiment_best_id"),
+            "host_note": "Agent summary is not execution evidence; verify against evaluations and measurements.",
+        }
+        finish_experiment(
+            self.db,
+            experiment["id"],
+            status=status,
+            conclusion=conclusion,
+            stop_reason="agent_finished_experiment",
+        )
+        return {"experiment_id": experiment["id"], "status": status, "conclusion": conclusion}
 
     def _finish_task(self, task: dict, attempt: dict, arguments: dict) -> dict:
         reason = str(arguments.get("reason") or "other")

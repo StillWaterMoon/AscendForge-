@@ -160,6 +160,36 @@ class ExperimentServiceTests(unittest.TestCase):
         self.assertIsNotNone(context["success_criteria"])
         self.assertIsNotNone(context["budget"])
 
+    def test_first_verified_candidate_establishes_baseline(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-baseline-build-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        experiment = ensure_active(env.db, task["id"])
+        self.assertIsNone(experiment["baseline_attempt_id"])
+        candidate = seed_attempt(env, task, source="// first correct implementation")
+        self.assertTrue(
+            note_result(
+                env.db,
+                experiment["id"],
+                candidate["id"],
+                {"all_passed": True, "time_values": [10]},
+            )
+        )
+        refreshed = active_experiment(env.db, task["id"])
+        self.assertEqual(refreshed["baseline_attempt_id"], candidate["id"])
+        self.assertEqual(refreshed["working_attempt_id"], candidate["id"])
+        self.assertEqual(refreshed["experiment_best_id"], candidate["id"])
+
+    def test_budget_completion_closes_experiment_incomplete(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-budget-close-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running")
+        experiment = ensure_active(env.db, task["id"])
+        env.tasks.complete(task["id"], "budget:max_attempts")
+        refreshed = env.db.query_one("SELECT * FROM experiments WHERE id=?", (experiment["id"],))
+        self.assertEqual(refreshed["status"], "abandoned")
+        self.assertEqual(refreshed["stop_reason"], "budget:max_attempts")
+
     def test_no_attempts_means_no_legacy_group(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-experiment-empty-"))
         env = make_env(tmp)

@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import Settings
 from .db import Database
+from .experiment_service import active_experiment, finish_experiment
 from .experiments import (
     add_event,
     attempt_history,
@@ -421,7 +422,36 @@ class TaskService:
                 (task_id, None, f"task_{target}", canonical_json({"reason": reason, "from": current}), current_ts),
             )
             updated = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-            return dict(updated)
+            result = dict(updated)
+        if target in (TASK_COMPLETED, TASK_FAILED, TASK_STOPPED):
+            self._close_active_experiment(task_id, target, reason)
+        return result
+
+    def _close_active_experiment(self, task_id: str, target: str, reason: str | None) -> None:
+        experiment = active_experiment(self.db, task_id)
+        if not experiment:
+            return
+        reason_text = str(reason or "")
+        verified = (
+            target == TASK_COMPLETED
+            and "target_reached" in reason_text
+            and bool(experiment.get("experiment_best_id"))
+        )
+        status = "completed" if verified else "abandoned"
+        conclusion = {
+            "status": "completed" if verified else "incomplete",
+            "verified": verified,
+            "task_terminal_status": target,
+            "stop_reason": reason,
+            "experiment_best_attempt_id": experiment.get("experiment_best_id"),
+        }
+        finish_experiment(
+            self.db,
+            experiment["id"],
+            status=status,
+            conclusion=conclusion,
+            stop_reason=reason or status,
+        )
 
     def start(self, task_id: str) -> dict:
         task = self.get(task_id)

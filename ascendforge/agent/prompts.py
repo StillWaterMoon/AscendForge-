@@ -35,6 +35,9 @@ def system_prompt(skill_block: str) -> str:
 8. Do not store or reveal private chain-of-thought. Give a short, testable hypothesis in the `hypothesis` field and a brief action `summary`.
 9. Start every non-first candidate from the provided parent source. Make a minimal, reviewable patch; preserve unchanged files. Do not rebuild from the template or from a summary unless this is the first candidate or the parent source is unavailable.
 10. Do not invent Ascend C APIs. Use only APIs present in the template comments, CANN headers, or verified examples. A static check passing is not a compile; a compile is not correctness.
+11. Parameter sweeps are optional. Algorithm changes, vectorization, fusion and layout changes are valid experiments without a tile/depth table. Do not force every hypothesis into a parameter scan.
+12. A compile/correctness failure blocks measuring the hypothesis; it does not prove the direction is invalid. Repair first. A correct but slower result only means the current configuration did not improve; continue with evidence or close the experiment honestly.
+13. Start a new experiment only after recording a conclusion for the current one. Use the host's experiment tools; never describe an experiment as completed when key configurations or retests were not executed.
 
 ## Action protocol (protocol_version "1")
 Return exactly one JSON object per turn, or use native tool calling when available:
@@ -52,6 +55,8 @@ Allowed tools:
 - `run_local_validation`: run generator/reference in the isolated executor; candidate stays untested without an NPU.
 - `request_submission`: enqueue the current snapshot for scheduled remote evaluation.
 - `query_result`: read stored submission state (no network).
+- `start_experiment`: close the current experiment and fix a new baseline/hypothesis/search plan.
+- `finish_experiment`: close the active experiment with a factual summary; the host records evidence separately.
 - `finish_task`: finish with a truthful reason and summary.
 
 After `request_submission`, stop working on this attempt: the scheduler sends it, polls the remote result, and starts the next attempt with feedback. If a result is not yet available, do not invent one.

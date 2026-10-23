@@ -148,6 +148,33 @@ TOOLS: dict[str, dict] = {
             description="Read stored submission state.",
         ),
     },
+    "start_experiment": {
+        "name": "start_experiment",
+        "description": "Close the current experiment and start a new one with a fixed baseline, explicit hypothesis, search space and success criteria. Use this after the current direction has produced a conclusion; do not use it to hide a failed build.",
+        "parameters": _schema(
+            {
+                "hypothesis": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "baseline_attempt_id": {"type": "string"},
+                "search_space": {"type": "object"},
+                "success_criteria": {"type": "object"},
+                "budget": {"type": "object"},
+            },
+            ["hypothesis"],
+            description="Start a new experiment.",
+        ),
+    },
+    "finish_experiment": {
+        "name": "finish_experiment",
+        "description": "Close the active experiment and record a factual conclusion. The host records the evidence; the summary must not claim more than the measured result supports.",
+        "parameters": _schema(
+            {
+                "status": {"type": "string", "enum": ["completed", "abandoned"]},
+                "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+            },
+            ["status", "summary"],
+            description="Finish the active experiment.",
+        ),
+    },
     "finish_task": {
         "name": "finish_task",
         "description": "Stop optimizing and finish the task. Use after budget, target, or when no further useful hypothesis remains. Do not claim a score improvement that was not measured.",
