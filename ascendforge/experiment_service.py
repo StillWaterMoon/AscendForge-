@@ -236,4 +236,8 @@ def current_context(db: Database, task_id: str) -> dict:
         "baseline_perf": _perf(db, experiment.get("baseline_attempt_id")),
         "experiment_best_perf": _perf(db, experiment.get("experiment_best_id")),
         "global_best_perf": _perf(db, task.get("best_attempt_id") if task else None),
+        "performance_best_attempt_id": task.get("performance_best_attempt_id") if task else None,
+        "performance_best": json_loads(task.get("performance_best_json"), None)
+        if task and task.get("performance_best_json")
+        else None,
     }

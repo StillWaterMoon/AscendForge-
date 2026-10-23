@@ -13,7 +13,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 87 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 88 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
@@ -143,7 +143,7 @@ ascendforge/
     capabilities.py      NPU/CANN/Docker 诚实检测
   backup.py, cli.py, db.py, states.py
 skills/                  四个 SKILL.md（通用优化 + Ascend 平台 + 测试生成 + 工作台规范）
-tests/                   87 个 unittest
+tests/                   88 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -158,6 +158,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 实验/修订：`experiments` 固定 `baseline_attempt_id` 和 `working_attempt_id`；attempt 通过 `experiment_id` 归属实验；新实验从 global best 开始，实验内新修订从 working revision 派生
 - 旧数据：已有 attempt 自动归入一个 `legacy` experiment，不伪造历史猜想；下一次新建 attempt 会开启新实验
 - 兼容层：`evaluations` 表、revision 的 config/edit_mode 字段已预留；真实 patch、参数评测和去重仍在下一阶段
+- 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值
 - 远端反馈：上下文自动包含最近一次逐测试点 `precision_ratio`/耗时；历史工具也返回 `testcase_precision`，不只给聚合最小值

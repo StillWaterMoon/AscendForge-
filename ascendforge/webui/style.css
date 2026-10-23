@@ -134,6 +134,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -311,7 +312,7 @@ tr.clickable:hover td { background: rgba(245,165,36,.04); }
 
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 900px) {
-  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-4, .grid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topbar { gap: 12px; padding: 10px 14px; }
   .nav { overflow-x: auto; }
@@ -319,7 +320,7 @@ tr.clickable:hover td { background: rgba(245,165,36,.04); }
   .view { padding: 18px 14px 70px; }
 }
 @media (max-width: 620px) {
-  .grid-2, .grid-3, .grid-4, .form-grid { grid-template-columns: 1fr; }
+  .grid-2, .grid-3, .grid-4, .grid-5, .form-grid { grid-template-columns: 1fr; }
   .field.span-2 { grid-column: span 1; }
   .brand-text { display: none; }
 }

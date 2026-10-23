@@ -495,6 +495,135 @@ def candidate_metric(normalized: dict, config: dict) -> dict | None:
     return None
 
 
+def performance_metric(normalized: dict, config: dict) -> dict | None:
+    """Return a performance measurement, never a correctness fallback.
+
+    ``performance_metric`` selects ``max_time`` (default) or ``avg_time``.
+    Without timing samples the result is *unknown*, not "no improvement".
+    """
+    values = [_as_float(v) for v in normalized.get("time_values", [])]
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
+    target = str(config.get("performance_metric") or "max_time").lower()
+    if target in ("avg", "avg_time", "mean", "mean_time"):
+        name, value = "avg_time", sum(values) / len(values)
+    else:
+        name, value = "max_time", max(values)
+    return {
+        "metric": name,
+        "value": value,
+        "max_time": max(values),
+        "avg_time": sum(values) / len(values),
+        "samples": len(values),
+        "unit": config.get("time_unit"),
+    }
+
+
+def update_performance_best(
+    db: Database,
+    task_id: str,
+    attempt_id: str,
+    normalized: dict,
+    config: dict,
+) -> dict | None:
+    """Update task-level performance best independently of the correctness baseline."""
+    if not normalized.get("all_passed"):
+        return None
+    metric = performance_metric(normalized, config)
+    if metric is None:
+        return None
+    threshold = float(config.get("performance_min_improvement_pct") or 0.0)
+    with db.transaction() as conn:
+        task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not task:
+            return None
+        current = json_loads(task["performance_best_json"], None) if task["performance_best_json"] else None
+        if current and current.get("metric") == metric["metric"]:
+            current_value = _as_float(current.get("value"))
+            if current_value is not None and metric["value"] >= current_value * (1 - threshold / 100.0):
+                return None
+        summary = {
+            "attempt_id": attempt_id,
+            "metric": metric["metric"],
+            "value": metric["value"],
+            "max_time": metric["max_time"],
+            "avg_time": metric["avg_time"],
+            "samples": metric["samples"],
+            "unit": metric["unit"],
+            "testcase_passed": normalized.get("testcase_passed"),
+            "testcase_total": normalized.get("testcase_total"),
+            "updated_at": now(),
+        }
+        conn.execute(
+            "UPDATE tasks SET performance_best_attempt_id=?, performance_best_json=?, updated_at=? WHERE id=?",
+            (attempt_id, canonical_json(summary), now(), task_id),
+        )
+        conn.execute(
+            "INSERT INTO events(task_id, attempt_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (task_id, attempt_id, "performance_best_updated", canonical_json(summary), now()),
+        )
+        return summary
+
+
+def recompute_performance_best(db: Database, task_id: str, config: dict | None = None) -> dict | None:
+    """Recompute task performance best from persisted passing attempts."""
+    task = db.query_one("SELECT * FROM tasks WHERE id=?", (task_id,))
+    if not task:
+        return None
+    config = config if config is not None else json_loads(task.get("config_json"), {})
+    best: tuple[float, dict, dict] | None = None
+    for attempt in db.query(
+        "SELECT id, normalized_json, ordinal FROM attempts WHERE task_id=? AND normalized_json IS NOT NULL",
+        (task_id,),
+    ):
+        normalized = json_loads(attempt["normalized_json"], {})
+        if not normalized.get("all_passed"):
+            continue
+        metric = performance_metric(normalized, config)
+        if metric is None:
+            continue
+        value = metric["value"]
+        if best is None or value < best[0]:
+            best = (value, metric, normalized)
+    if best is None:
+        return None
+    metric = best[1]
+    summary = {
+        "attempt_id": None,
+        "metric": metric["metric"],
+        "value": metric["value"],
+        "max_time": metric["max_time"],
+        "avg_time": metric["avg_time"],
+        "samples": metric["samples"],
+        "unit": metric["unit"],
+        "updated_at": now(),
+    }
+    # Locate the winning attempt again; keep the update atomic.
+    for attempt in db.query(
+        "SELECT id, normalized_json FROM attempts WHERE task_id=? AND normalized_json IS NOT NULL",
+        (task_id,),
+    ):
+        normalized = json_loads(attempt["normalized_json"], {})
+        if not normalized.get("all_passed"):
+            continue
+        candidate = performance_metric(normalized, config)
+        if candidate and candidate["metric"] == metric["metric"] and candidate["value"] == metric["value"]:
+            summary["attempt_id"] = attempt["id"]
+            break
+    if not summary["attempt_id"]:
+        return None
+    db.execute(
+        "UPDATE tasks SET performance_best_attempt_id=?, performance_best_json=?, updated_at=? WHERE id=?",
+        (summary["attempt_id"], canonical_json(summary), now(), task_id),
+    )
+    db.insert(
+        "INSERT INTO events(task_id, attempt_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)",
+        (task_id, summary["attempt_id"], "performance_best_recomputed", canonical_json(summary), now()),
+    )
+    return summary
+
+
 def _metric_better(candidate: dict, current: dict | None) -> bool:
     if current is None:
         return True

@@ -23,6 +23,7 @@ from .experiments import (
     normalize_result,
     read_snapshot,
     update_attempt,
+    update_performance_best,
     update_remote_best,
     usage_summary,
 )
@@ -746,6 +747,13 @@ class Scheduler:
             )
         if normalized.get("all_passed"):
             update_remote_best(self.db, submission["task_id"], submission["attempt_id"], normalized, config)
+            update_performance_best(
+                self.db,
+                submission["task_id"],
+                submission["attempt_id"],
+                normalized,
+                config,
+            )
             if submission.get("experiment_id"):
                 improved = note_result(
                     self.db,

@@ -9,7 +9,7 @@ from ascendforge.experiment_service import (
     note_result,
     set_working_revision,
 )
-from ascendforge.experiments import create_attempt
+from ascendforge.experiments import create_attempt, update_performance_best
 
 from tests.helpers import make_env, seed_attempt, seed_task
 
@@ -77,6 +77,52 @@ class ExperimentServiceTests(unittest.TestCase):
         self.assertFalse(note_result(env.db, experiment["id"], candidate["id"], {"all_passed": True}))
         refreshed = active_experiment(env.db, task["id"])
         self.assertIsNone(refreshed["experiment_best_id"])
+
+    def test_performance_best_compares_time_not_precision(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-performance-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running", config={"metric": "auto"})
+        first = seed_attempt(env, task, source="// slow")
+        second = seed_attempt(env, task, source="// slower")
+        third = seed_attempt(env, task, source="// fast")
+        self.assertIsNotNone(
+            update_performance_best(
+                env.db,
+                task["id"],
+                first["id"],
+                {"all_passed": True, "time_values": [10, 20]},
+                {"metric": "auto"},
+            )
+        )
+        self.assertIsNone(
+            update_performance_best(
+                env.db,
+                task["id"],
+                second["id"],
+                {"all_passed": True, "time_values": [15, 25]},
+                {"metric": "auto"},
+            )
+        )
+        self.assertIsNotNone(
+            update_performance_best(
+                env.db,
+                task["id"],
+                third["id"],
+                {"all_passed": True, "time_values": [5, 8]},
+                {"metric": "auto"},
+            )
+        )
+        row = env.db.query_one("SELECT performance_best_attempt_id FROM tasks WHERE id=?", (task["id"],))
+        self.assertEqual(row["performance_best_attempt_id"], third["id"])
+        self.assertIsNone(
+            update_performance_best(
+                env.db,
+                task["id"],
+                first["id"],
+                {"all_passed": True, "precision_ratio": 1.0},
+                {"metric": "auto"},
+            )
+        )
 
     def test_no_attempts_means_no_legacy_group(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-experiment-empty-"))
