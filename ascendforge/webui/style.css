@@ -775,6 +775,7 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
   font-size: 11.5px;
 }
 .experiment-title { color: var(--text); font-weight: 650; }
+.experiment-hypothesis { flex: 1 1 320px; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strategy-strip {
   display: flex;
   align-items: center;

@@ -19,6 +19,8 @@ from .experiment_service import note_result, set_working_revision
 from .experiments import (
     add_event,
     attempt_history,
+    comparison_key,
+    expected_testcases,
     get_attempt,
     normalize_result,
     read_snapshot,
@@ -528,7 +530,10 @@ class Scheduler:
                 if exc.code in ("AUTH_EXPIRED", "AUTH_REQUIRED"):
                     self.tasks.mark_needs_login(submission["task_id"], "对账时登录失效")
                 return {"state": SUBMISSION_UNKNOWN, "error": exc.public()}
-            normalized = normalize_result(raw)
+            problem = json_loads(task.get("problem_json"), {})
+            config = json_loads(task.get("config_json"), {})
+            expected = expected_testcases(problem)
+            normalized = normalize_result(raw, expected, comparison_key(problem, config))
             if normalized.get("final"):
                 self._finish_submission(submission, raw, normalized, actor=actor)
                 self._resume_if_reconciled(submission["task_id"])
@@ -663,7 +668,13 @@ class Scheduler:
                 log.exception("unexpected poll failure")
                 self._reschedule_poll(submission, 30)
                 continue
-            normalized = normalize_result(raw)
+            task = self.db.query_one(
+                "SELECT problem_json, config_json FROM tasks WHERE id=?", (submission["task_id"],)
+            )
+            problem = json_loads(task.get("problem_json"), {}) if task else {}
+            config = json_loads(task.get("config_json"), {}) if task else {}
+            expected = expected_testcases(problem)
+            normalized = normalize_result(raw, expected, comparison_key(problem, config))
             if normalized.get("final"):
                 self._finish_submission(submission, raw, normalized, actor="worker")
             else:

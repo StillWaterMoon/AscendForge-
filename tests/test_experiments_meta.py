@@ -4,10 +4,12 @@ from pathlib import Path
 
 from ascendforge.experiment_service import (
     active_experiment,
+    current_context,
     ensure_active,
     ensure_legacy,
     note_result,
     set_working_revision,
+    start_experiment,
 )
 from ascendforge.experiments import create_attempt, update_performance_best
 
@@ -123,6 +125,40 @@ class ExperimentServiceTests(unittest.TestCase):
                 {"metric": "auto"},
             )
         )
+
+    def test_start_experiment_records_fixed_baseline_and_plan(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-experiment-start-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="paused")
+        baseline = seed_attempt(env, task, source="// passing")
+        env.db.execute(
+            "UPDATE attempts SET normalized_json=? WHERE id=?",
+            ('{"all_passed": true, "time_values": [10]}', baseline["id"]),
+        )
+        env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=? WHERE id=?",
+            (baseline["id"], baseline["id"], task["id"]),
+        )
+        old = ensure_active(env.db, task["id"])
+        new = start_experiment(
+            env.db,
+            task["id"],
+            hypothesis="tile and depth sweep",
+            baseline_attempt_id=baseline["id"],
+            search_space={"configs": [{"tile": 8192}, {"tile": 32768}]},
+            success_criteria={"all_passed": True},
+            budget={"max_revisions": 2},
+        )
+        refreshed_old = env.db.query_one("SELECT * FROM experiments WHERE id=?", (old["id"],))
+        self.assertEqual(refreshed_old["status"], "completed")
+        self.assertEqual(refreshed_old["stop_reason"], "superseded_by_new_experiment")
+        self.assertEqual(new["baseline_attempt_id"], baseline["id"])
+        context = current_context(env.db, task["id"])
+        self.assertEqual(context["id"], new["id"])
+        self.assertEqual(context["hypothesis"], "tile and depth sweep")
+        self.assertIsNotNone(context["search_space"])
+        self.assertIsNotNone(context["success_criteria"])
+        self.assertIsNotNone(context["budget"])
 
     def test_no_attempts_means_no_legacy_group(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-experiment-empty-"))

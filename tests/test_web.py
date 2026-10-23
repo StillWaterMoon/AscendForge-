@@ -51,7 +51,10 @@ class WebTests(unittest.TestCase):
         cls.env = make_env(cls.tmp)
         cls.task = seed_task(cls.env, title="Web task")
         cls.attempt = seed_attempt(cls.env, cls.task, source="// web best candidate\n")
-        normalized = normalize_result({"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 9})
+        normalized = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 9},
+            expected_testcases_count=1,
+        )
         cls.env.db.execute(
             "UPDATE attempts SET status='finished', normalized_json=?, result_json=? WHERE id=?",
             (canonical_json(normalized), canonical_json({"status": "Pass"}), cls.attempt["id"]),

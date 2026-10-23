@@ -328,7 +328,57 @@ def _testcase_status(item: dict) -> str:
     ).strip()
 
 
-def normalize_result(raw: Any) -> dict:
+def expected_testcases(problem: dict | None) -> int | None:
+    """Return the problem's declared testcase count, if the contract has one."""
+    if not isinstance(problem, dict):
+        return None
+    cases = problem.get("testcases")
+    if isinstance(cases, list):
+        return len(cases)
+    for key in ("testcase_count", "testcase_total", "total_testcases"):
+        value = problem.get(key)
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
+
+
+def comparison_key(problem: dict | None, config: dict | None = None) -> str:
+    """Fingerprint the problem/test set/environment used for performance comparisons."""
+    problem = problem or {}
+    config = config or {}
+    testcase_ids = []
+    for item in problem.get("testcases") or []:
+        if not isinstance(item, dict):
+            continue
+        testcase_id = item.get("testcase_id") or item.get("id") or item.get("_id")
+        if isinstance(testcase_id, dict):
+            testcase_id = testcase_id.get("_id") or testcase_id.get("ID")
+        if testcase_id is not None:
+            testcase_ids.append(str(testcase_id))
+    payload = {
+        "problem_id": problem.get("_id") or problem.get("ID") or problem.get("name"),
+        "problem_version": problem.get("version_no") or problem.get("version_label"),
+        "testcase_ids": sorted(testcase_ids),
+        "cann_version": problem.get("cann_version"),
+        "soc_version": problem.get("soc_version"),
+        "ddk_version": problem.get("ddk_version"),
+        "code_template": problem.get("code_template"),
+        "time_unit": config.get("time_unit"),
+        "performance_metric": config.get("performance_metric") or "max_time",
+        "environment_fingerprint": config.get("environment_fingerprint"),
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def normalize_result(
+    raw: Any,
+    expected_testcases_count: int | None = None,
+    comparison_fingerprint: str | None = None,
+) -> dict:
     """Normalise a CANNJudge result while preserving the raw payload.
 
     The platform's own status strings and time values are kept verbatim.  We do
@@ -403,7 +453,19 @@ def normalize_result(raw: Any) -> dict:
     else:
         outcome, final = OUTCOME_UNKNOWN, False
 
-    all_passed = outcome == OUTCOME_PASSED and (total == 0 or passed_count == total)
+    testset_passed = outcome == OUTCOME_PASSED and total > 0 and passed_count == total
+    declared = expected_testcases_count
+    for key in ("testcase_total", "testcase_count", "total_testcases"):
+        if declared is None and raw.get(key) is not None:
+            try:
+                declared = int(raw[key])
+            except (TypeError, ValueError):
+                declared = None
+    if expected_testcases_count is None and declared is None:
+        coverage_complete = False
+    else:
+        coverage_complete = bool(declared and total >= declared and passed_count >= declared)
+    all_passed = testset_passed and coverage_complete
     known = {
         "status",
         "state",
@@ -442,7 +504,14 @@ def normalize_result(raw: Any) -> dict:
         "outcome": outcome,
         "final": final,
         "passed": all_passed,
+        "testset_passed": testset_passed,
         "all_passed": all_passed,
+        "coverage_complete": coverage_complete,
+        "coverage_scope": "full_expected_testset" if all_passed else (
+            "current_testset_only" if testset_passed else "incomplete_or_failed"
+        ),
+        "testcase_expected": declared,
+        "comparison_key": comparison_fingerprint,
         "raw_status": status_text or None,
         "message": message,
         "testcases": testcases,
@@ -539,6 +608,10 @@ def update_performance_best(
         if not task:
             return None
         current = json_loads(task["performance_best_json"], None) if task["performance_best_json"] else None
+        fingerprint = normalized.get("comparison_key")
+        if current and fingerprint and current.get("comparison_key") and current["comparison_key"] != fingerprint:
+            # A different problem version/test set/environment is not comparable.
+            return None
         if current and current.get("metric") == metric["metric"]:
             current_value = _as_float(current.get("value"))
             if current_value is not None and metric["value"] >= current_value * (1 - threshold / 100.0):
@@ -551,6 +624,7 @@ def update_performance_best(
             "avg_time": metric["avg_time"],
             "samples": metric["samples"],
             "unit": metric["unit"],
+            "comparison_key": fingerprint,
             "testcase_passed": normalized.get("testcase_passed"),
             "testcase_total": normalized.get("testcase_total"),
             "updated_at": now(),
@@ -572,6 +646,8 @@ def recompute_performance_best(db: Database, task_id: str, config: dict | None =
     if not task:
         return None
     config = config if config is not None else json_loads(task.get("config_json"), {})
+    problem = json_loads(task.get("problem_json"), {})
+    fingerprint = comparison_key(problem, config)
     best: tuple[float, dict, dict] | None = None
     for attempt in db.query(
         "SELECT id, normalized_json, ordinal FROM attempts WHERE task_id=? AND normalized_json IS NOT NULL",
@@ -579,6 +655,8 @@ def recompute_performance_best(db: Database, task_id: str, config: dict | None =
     ):
         normalized = json_loads(attempt["normalized_json"], {})
         if not normalized.get("all_passed"):
+            continue
+        if normalized.get("comparison_key") != fingerprint:
             continue
         metric = performance_metric(normalized, config)
         if metric is None:
@@ -597,6 +675,7 @@ def recompute_performance_best(db: Database, task_id: str, config: dict | None =
         "avg_time": metric["avg_time"],
         "samples": metric["samples"],
         "unit": metric["unit"],
+        "comparison_key": fingerprint,
         "updated_at": now(),
     }
     # Locate the winning attempt again; keep the update atomic.
@@ -605,7 +684,7 @@ def recompute_performance_best(db: Database, task_id: str, config: dict | None =
         (task_id,),
     ):
         normalized = json_loads(attempt["normalized_json"], {})
-        if not normalized.get("all_passed"):
+        if not normalized.get("all_passed") or normalized.get("comparison_key") != fingerprint:
             continue
         candidate = performance_metric(normalized, config)
         if candidate and candidate["metric"] == metric["metric"] and candidate["value"] == metric["value"]:

@@ -28,6 +28,7 @@ PROBLEM = {
     "code_template": "npu_kernel_dev",
     "description": "Compute y = x1 + x2 with float32.",
     "constraints": "1 <= n <= 1024",
+    "testcases": [{"testcase_id": "case-1"}],
 }
 TEMPLATE = {
     "files": [

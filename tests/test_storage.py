@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ascendforge.experiments import (
     SnapshotError,
+    comparison_key,
     archive_integrity,
     build_task_archive,
     create_snapshot,
@@ -41,12 +42,28 @@ class StorageTests(unittest.TestCase):
 
     def test_normalization(self):
         passed = normalize_result(
-            {"status": "Pass", "result": [{"testcase_status": "Pass", "precision_ratio": 0.999, "time": 2}], "score": 7}
+            {"status": "Pass", "result": [{"testcase_status": "Pass", "precision_ratio": 0.999, "time": 2}], "score": 7},
+            expected_testcases_count=1,
         )
         self.assertEqual(passed["outcome"], "passed")
         self.assertTrue(passed["all_passed"])
         self.assertEqual(passed["testcase_passed"], 1)
         self.assertEqual(passed["time_values"], [2])
+        self.assertTrue(passed["coverage_complete"])
+
+        partial = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}]},
+            expected_testcases_count=2,
+        )
+        self.assertTrue(partial["testset_passed"])
+        self.assertFalse(partial["all_passed"])
+        self.assertFalse(partial["coverage_complete"])
+
+        unknown_coverage = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}]}
+        )
+        self.assertTrue(unknown_coverage["testset_passed"])
+        self.assertFalse(unknown_coverage["all_passed"])
 
         mixed = normalize_result(
             {"status": "Pass", "result": [{"testcase_status": "Pass"}, {"testcase_status": "Fail"}]}
@@ -78,11 +95,23 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(runtime["outcome"], "runtime_error")
         self.assertIn("ProfileError", runtime["message"])
 
+    def test_comparison_key_changes_with_testset_and_environment(self):
+        problem = {"_id": "p", "testcases": [{"testcase_id": "a"}], "soc_version": "950"}
+        first = comparison_key(problem, {"time_unit": "ms"})
+        changed = comparison_key(
+            {"_id": "p", "testcases": [{"testcase_id": "b"}], "soc_version": "950"},
+            {"time_unit": "ms"},
+        )
+        self.assertNotEqual(first, changed)
+
     def test_best_only_replaced_by_comparable_improvement(self):
         task = seed_task(self.env, config={"metric": "score"})
         attempt1 = seed_attempt(self.env, task, source="// v1")
         config = {"metric": "score"}
-        result10 = normalize_result({"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 10})
+        result10 = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 10},
+            expected_testcases_count=1,
+        )
         self.env.db.execute(
             "UPDATE attempts SET normalized_json=? WHERE id=?",
             (canonical_json(result10), attempt1["id"]),
@@ -91,7 +120,10 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(best["attempt_id"], attempt1["id"])
 
         attempt2 = seed_attempt(self.env, task, parent=attempt1["id"], source="// v2")
-        result8 = normalize_result({"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 8})
+        result8 = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 8},
+            expected_testcases_count=1,
+        )
         self.env.db.execute(
             "UPDATE attempts SET normalized_json=? WHERE id=?",
             (canonical_json(result8), attempt2["id"]),
@@ -100,7 +132,10 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(self.env.tasks.get(task["id"])["best_attempt_id"], attempt1["id"])
 
         attempt3 = seed_attempt(self.env, task, parent=attempt1["id"], source="// v3")
-        result12 = normalize_result({"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 12})
+        result12 = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 12},
+            expected_testcases_count=1,
+        )
         self.env.db.execute(
             "UPDATE attempts SET normalized_json=? WHERE id=?",
             (canonical_json(result12), attempt3["id"]),

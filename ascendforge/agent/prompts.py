@@ -346,6 +346,9 @@ experiment_id: {(experiment or {}).get('id') or '(none)'}
 status: {(experiment or {}).get('status') or '(not started)'}
 ordinal: {(experiment or {}).get('ordinal') or '—'}
 hypothesis: {(experiment or {}).get('hypothesis') or '(not recorded)'}
+search_space: {(experiment or {}).get('search_space') or '(not recorded)'}
+success_criteria: {(experiment or {}).get('success_criteria') or '(not recorded)'}
+experiment_budget: {(experiment or {}).get('budget') or '(not recorded)'}
 baseline_attempt: {(experiment or {}).get('baseline_attempt_id') or '(none)'}
 working_attempt: {(experiment or {}).get('working_attempt_id') or '(none)'}
 experiment_best: {(experiment or {}).get('experiment_best_id') or '(none)'}
@@ -357,6 +360,9 @@ performance_best: {(experiment or {}).get('performance_best') or '(unknown)'}
 A revision belongs to the current experiment. Start from the working revision
 when continuing this experiment; a new experiment starts from the global best.
 The baseline stays fixed for the lifetime of the experiment.
+When `search_space.configs` is present, do not stack unrelated edits: construct
+each configuration from the fixed baseline/implementation, record what actually
+changed, and compare only results from the same comparison key.
 
 ## Experiment history (newest first)
 {_history(attempts, current_id=attempt.get('id'))}

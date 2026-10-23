@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -107,6 +107,10 @@ CREATE TABLE IF NOT EXISTS experiments (
     hypothesis TEXT,
     plan_json TEXT,
     params_json TEXT,
+    search_space_json TEXT,
+    success_criteria_json TEXT,
+    budget_json TEXT,
+    stop_reason TEXT,
     baseline_attempt_id TEXT,
     working_attempt_id TEXT,
     experiment_best_id TEXT,
@@ -347,6 +351,12 @@ class Database:
         nullable; the experiment service assigns legacy rows lazily.
         """
         additions = {
+            "experiments": {
+                "search_space_json": "TEXT",
+                "success_criteria_json": "TEXT",
+                "budget_json": "TEXT",
+                "stop_reason": "TEXT",
+            },
             "tasks": {
                 "performance_best_attempt_id": "TEXT",
                 "performance_best_json": "TEXT",

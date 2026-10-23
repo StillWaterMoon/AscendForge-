@@ -672,6 +672,8 @@ async function renderTask(taskId) {
       <span>baseline <b class="mono">${esc(String(task.experiment.baseline_attempt_id || '—').slice(0, 12))}</b></span>
       <span>working <b class="mono">${esc(String(task.experiment.working_attempt_id || '—').slice(0, 12))}</b></span>
       <span>experiment best <b class="mono">${esc(String(task.experiment.experiment_best_id || '—').slice(0, 12))}</b></span>
+      ${task.experiment.hypothesis ? `<span class="experiment-hypothesis" title="${esc(task.experiment.hypothesis)}">${esc(String(task.experiment.hypothesis).slice(0, 120))}</span>` : ''}
+      <button class="btn btn-sm btn-ghost" data-experiment-edit type="button">实验设置</button>
     </div>` : ''}
 
     <div class="grid grid-5" style="margin-bottom:16px">
@@ -725,6 +727,7 @@ async function renderTask(taskId) {
   if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
   $$('[data-message]').forEach((button) => button.addEventListener('click', () => openMessageModal(task)));
   $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
+  $$('[data-experiment-edit]').forEach((button) => button.addEventListener('click', () => openExperimentModal(task)));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -787,6 +790,75 @@ async function openBudgetModal(task) {
       });
       closeModal();
       toast('运行上限已更新', 'success');
+      renderTask(task.id).catch(() => {});
+    } catch (err) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message || '保存失败';
+      button.disabled = false;
+    }
+  });
+}
+
+async function openExperimentModal(task) {
+  const experiment = task.experiment || {};
+  const active = Boolean(experiment.id && experiment.status === 'active');
+  const baseline = experiment.baseline_attempt_id || task.performance_best_attempt_id || task.best_attempt_id || '';
+  const search = experiment.search_space ? JSON.stringify(experiment.search_space, null, 2) : '';
+  const criteria = experiment.success_criteria ? JSON.stringify(experiment.success_criteria, null, 2) : '';
+  const budget = experiment.budget ? JSON.stringify(experiment.budget, null, 2) : '';
+  openModal('实验设置', `
+    <form id="experiment-form" class="stack">
+      <div class="alert info">实验猜想会固定基线和工作版本；实验期间全局 best 变化不会改变本实验 baseline。参数实验建议从 performance best 构造，而不是沿上一修订继续叠加改动。</div>
+      <div class="field"><label for="experiment-hypothesis">Hypothesis（本轮要验证什么）</label><textarea id="experiment-hypothesis" rows="4" placeholder="例如：CopySign 的瓶颈是 tile/per-tile 开销；在保持 15/15 的前提下，tile 和 depth 的组合会影响耗时。">${esc(experiment.hypothesis || '')}</textarea></div>
+      <label class="checkbox"><input id="experiment-new" type="checkbox" ${active ? '' : 'checked'}>开始新实验（关闭当前实验并固定新 baseline）</label>
+      <div class="field"><label for="experiment-baseline">Baseline attempt</label><input id="experiment-baseline" value="${esc(baseline)}" ${active ? 'disabled' : ''}></div>
+      <div class="form-grid">
+        <div class="field"><label for="experiment-search">Search space（JSON）</label><textarea id="experiment-search" rows="5" placeholder='{"tile_bytes":[8192,32768],"depth":[1,2]}'>${esc(search)}</textarea></div>
+        <div class="field"><label for="experiment-criteria">Success criteria（JSON）</label><textarea id="experiment-criteria" rows="5" placeholder='{"all_passed":true,"performance_metric":"max_time","min_improvement_pct":2}'>${esc(criteria)}</textarea></div>
+      </div>
+      <div class="field"><label for="experiment-budget">Experiment budget（JSON，可选）</label><textarea id="experiment-budget" rows="3" placeholder='{"max_revisions":8,"max_submissions":4}'>${esc(budget)}</textarea></div>
+      <div class="alert error" id="experiment-error" hidden></div>
+      <div class="form-actions">
+        <button class="btn" type="button" data-modal-close>取消</button>
+        <button class="btn btn-primary" type="submit">${active ? '保存实验计划' : '开始实验'}</button>
+      </div>
+    </form>`);
+  const newExperiment = $('#experiment-new');
+  const baselineInput = $('#experiment-baseline');
+  const submitButton = $('#experiment-form button[type="submit"]');
+  const syncExperimentMode = () => {
+    baselineInput.disabled = active && !newExperiment.checked;
+    submitButton.textContent = newExperiment.checked ? '开始新实验' : '保存实验计划';
+  };
+  newExperiment.addEventListener('change', syncExperimentMode);
+  syncExperimentMode();
+  $('#experiment-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorBox = $('#experiment-error');
+    errorBox.hidden = true;
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    const parseJson = (id) => {
+      const value = $(id).value.trim();
+      if (!value) return {};
+      return JSON.parse(value);
+    };
+    try {
+      const body = {
+        hypothesis: $('#experiment-hypothesis').value,
+        new_experiment: newExperiment.checked,
+        baseline_attempt_id: $('#experiment-baseline').value.trim(),
+        search_space: parseJson('#experiment-search'),
+        success_criteria: parseJson('#experiment-criteria'),
+        budget: parseJson('#experiment-budget'),
+      };
+      await api(`/api/tasks/${encodeURIComponent(task.id)}/experiment`, {
+        method: 'POST',
+        body,
+        requestId: uuid(),
+      });
+      closeModal();
+      toast(body.new_experiment ? '新实验已固定基线' : '实验计划已保存', 'success');
       renderTask(task.id).catch(() => {});
     } catch (err) {
       errorBox.hidden = false;

@@ -35,7 +35,12 @@ from .agent.prompts import system_prompt
 from .agent.protocol import TOOLS
 from .agent.runtime import SKILLS_FOR_OPTIMIZATION
 from .agent.strategy import derive_active_strategy
-from .experiment_service import current_context
+from .experiment_service import (
+    active_experiment,
+    current_context,
+    start_experiment,
+    update_plan,
+)
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
 from .backup import BackupError, create_backup, list_backups, verify_backup
@@ -232,6 +237,7 @@ class App:
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/continue-optimization$", "h_continue_optimization", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/budget$", "h_update_budget", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/experiment$", "h_update_experiment", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages_post", False, False),
@@ -935,6 +941,69 @@ class Handler(BaseHTTPRequestHandler):
                 "update_budget",
                 task_id,
                 json_dumps({"old": {key: old.get(key) for key in patch}, "new": patch}),
+                now(),
+            ),
+        )
+        return self.h_task_detail(task_id)
+
+    def h_update_experiment(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        body = self._read_json()
+        hypothesis = str(body.get("hypothesis") or "").strip()
+        if not hypothesis:
+            raise ApiError(400, "BAD_EXPERIMENT", "hypothesis 不能为空")
+        try:
+            search_space = body.get("search_space")
+            if isinstance(search_space, str):
+                search_space = json.loads(search_space)
+            success_criteria = body.get("success_criteria")
+            if isinstance(success_criteria, str):
+                success_criteria = json.loads(success_criteria)
+            budget = body.get("budget")
+            if isinstance(budget, str):
+                budget = json.loads(budget)
+        except json.JSONDecodeError:
+            raise ApiError(400, "BAD_EXPERIMENT_JSON", "search_space/success_criteria/budget 必须是合法 JSON") from None
+        if body.get("new_experiment"):
+            experiment = start_experiment(
+                self.app.db,
+                task_id,
+                hypothesis=hypothesis,
+                baseline_attempt_id=str(body.get("baseline_attempt_id") or "").strip() or None,
+                search_space=search_space,
+                success_criteria=success_criteria,
+                budget=budget,
+                actor=(session or {}).get("username", "user"),
+            )
+        else:
+            active = active_experiment(self.app.db, task_id)
+            if not active:
+                experiment = start_experiment(
+                    self.app.db,
+                    task_id,
+                    hypothesis=hypothesis,
+                    baseline_attempt_id=str(body.get("baseline_attempt_id") or "").strip() or None,
+                    search_space=search_space,
+                    success_criteria=success_criteria,
+                    budget=budget,
+                    actor=(session or {}).get("username", "user"),
+                )
+            else:
+                experiment = update_plan(
+                    self.app.db,
+                    active["id"],
+                    hypothesis=hypothesis,
+                    search_space=search_space,
+                    success_criteria=success_criteria,
+                    budget=budget,
+                )
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                (session or {}).get("username"),
+                "update_experiment",
+                task_id,
+                json_dumps({"experiment_id": experiment["id"], "hypothesis": hypothesis[:500]}),
                 now(),
             ),
         )
