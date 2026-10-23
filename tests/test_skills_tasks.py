@@ -79,6 +79,11 @@ class TaskStateTests(unittest.TestCase):
             normalize_config({"metric": "time"})
         config = normalize_config({"metric": "time", "time_unit": "ms"})
         self.assertEqual(config["metric"], "time")
+        unlimited = normalize_config({"max_tokens": 0, "max_model_calls": 0})
+        self.assertEqual(unlimited["max_tokens"], 0)
+        self.assertEqual(unlimited["max_model_calls"], 0)
+        with self.assertRaises(TaskError):
+            normalize_config({"max_tokens": -1})
         with self.assertRaises(TaskError):
             normalize_config({"unknown_key": 1})
 

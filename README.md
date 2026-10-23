@@ -163,6 +163,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 参数实验：`parameter-run` 是宿主侧确定性 runner；配置枚举、固定基线、参数化源码快照、结果复用、失败重试、复测和预算耗尽均有记录；`--simulate` 不产生远端提交，真实模式通过 scheduler 提交并等待结果
 - 通用闭环：阶段、责任边界、已验证场景和剩余缺口见 [通用优化闭环](docs/general-optimization-loop.md)；参数扫描是可选执行器，不是所有实验的固定形式
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
+- 运行预算：`max_tokens=0` / `max_model_calls=0` 表示不限；提交上限、每日上限、尝试轮数、运行时长等仍由宿主强制执行，无限 Token 不等于无限提交
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值
 - 远端反馈：上下文自动包含最近一次逐测试点 `precision_ratio`/耗时；历史工具也返回 `testcase_precision`，不只给聚合最小值

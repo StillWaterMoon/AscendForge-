@@ -757,6 +757,8 @@ async function openBudgetModal(task) {
         <div class="field"><label for="budget-day-subs">每日提交上限</label><div class="row"><input id="budget-day-subs" type="number" min="0" max="200" value="${esc(config.max_submissions_per_day ?? 20)}"><label class="checkbox"><input id="budget-day-unlimited" type="checkbox" ${Number(config.max_submissions_per_day) === 0 ? 'checked' : ''}>不限</label></div></div>
         <div class="field"><label for="budget-attempts">最多尝试轮数</label><input id="budget-attempts" type="number" min="1" max="500" value="${esc(config.max_attempts ?? 30)}"></div>
         <div class="field"><label for="budget-stall">停滞轮数停止</label><input id="budget-stall" type="number" min="1" max="100" value="${esc(config.max_stall_rounds ?? 5)}"></div>
+        <div class="field"><label for="budget-model-calls">模型调用上限</label><div class="row"><input id="budget-model-calls" type="number" min="0" max="5000" value="${esc(config.max_model_calls ?? 120)}"><label class="checkbox"><input id="budget-model-unlimited" type="checkbox" ${Number(config.max_model_calls) === 0 ? 'checked' : ''}>不限</label></div></div>
+        <div class="field"><label for="budget-tokens">Token 上限</label><div class="row"><input id="budget-tokens" type="number" min="0" max="200000000" value="${esc(config.max_tokens ?? 3000000)}"><label class="checkbox"><input id="budget-token-unlimited" type="checkbox" ${Number(config.max_tokens) === 0 ? 'checked' : ''}>不限</label></div></div>
         <div class="field"><label for="budget-interval">最小提交间隔（秒，≥60）</label><input id="budget-interval" type="number" min="60" max="86400" value="${esc(config.min_submit_interval_sec ?? 300)}"></div>
         <div class="field"><label for="budget-inflight">同账号在途上限</label><input id="budget-inflight" type="number" min="1" max="3" value="${esc(config.max_inflight ?? 1)}"></div>
         <div class="field"><label for="budget-poll">结果轮询间隔（秒）</label><input id="budget-poll" type="number" min="3" max="600" value="${esc(config.poll_interval_sec ?? 10)}"></div>
@@ -782,6 +784,8 @@ async function openBudgetModal(task) {
           max_submissions_per_day: $('#budget-day-unlimited').checked ? 0 : Number($('#budget-day-subs').value),
           max_attempts: Number($('#budget-attempts').value),
           max_stall_rounds: Number($('#budget-stall').value),
+          max_model_calls: $('#budget-model-unlimited').checked ? 0 : Number($('#budget-model-calls').value),
+          max_tokens: $('#budget-token-unlimited').checked ? 0 : Number($('#budget-tokens').value),
           min_submit_interval_sec: Number($('#budget-interval').value),
           max_inflight: Number($('#budget-inflight').value),
           poll_interval_sec: Number($('#budget-poll').value),
@@ -972,9 +976,10 @@ function renderTaskAlert(task, quota) {
 }
 
 function budgetBar(label, value, max, note = '') {
-  const pct = max ? Math.min(100, Math.max(0, (Number(value) / Number(max)) * 100)) : 0;
+  const unlimited = max === null || max === undefined || Number(max) === 0;
+  const pct = unlimited ? 0 : Math.min(100, Math.max(0, (Number(value) / Number(max)) * 100));
   return `<div style="margin-bottom:12px">
-    <div class="row-between small"><span class="muted">${esc(label)}</span><span class="mono">${esc(value)} / ${esc(max ?? '—')}</span></div>
+    <div class="row-between small"><span class="muted">${esc(label)}</span><span class="mono">${esc(value)} / ${unlimited ? '不限' : esc(max)}</span></div>
     <div class="budget-track">
       <div class="budget-fill" style="width:${pct}%"></div>
     </div>
