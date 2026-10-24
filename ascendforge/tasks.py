@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -20,6 +21,7 @@ from .experiments import (
     usage_summary,
 )
 from .platform.base import PlatformError
+from .platform.cannjudge import CannjudgeAdapter
 from .platform.service import PlatformService
 from .states import (
     ATTEMPT_QUEUED,
@@ -79,7 +81,59 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "codex_runner_token": None,
     "manual_only": False,
     "strategy_prompt": "",
+    "project_source": "empty",
+    "project_template_sha256": None,
+    "project_template_archive": None,
+    "project_template_files": 0,
 }
+
+
+def _uploaded_template(archive: Path, task_dir: Path) -> tuple[dict, str]:
+    """解压用户项目模板并转成任务 template_json。
+
+    只接受 UTF-8 文本源码；ZIP 路径、符号链接和大小由
+    CannjudgeAdapter.extract_package 做安全校验。若压缩包只有一个根目录，
+    自动去掉这一层，避免 Codex 在 workspace/项目名/ 下工作。
+    """
+    target = task_dir / "project-template"
+    try:
+        extracted = CannjudgeAdapter.extract_package(archive, target)
+    except PlatformError as exc:
+        raise TaskError("BAD_PROJECT_TEMPLATE", f"项目模板解压失败：{exc.message}") from None
+    if not extracted:
+        raise TaskError("EMPTY_PROJECT_TEMPLATE", "项目模板压缩包为空")
+    if len(extracted) > 500:
+        raise TaskError("PROJECT_TEMPLATE_TOO_LARGE", "项目模板文件过多")
+    raw_files: dict[str, str] = {}
+    total = 0
+    for item in extracted:
+        rel = str(item["path"]).replace("\\", "/")
+        if rel.startswith("__MACOSX/") or rel.endswith(".DS_Store"):
+            continue
+        path = target / rel
+        data = path.read_bytes()
+        total += len(data)
+        if total > 64 * 1024 * 1024:
+            raise TaskError("PROJECT_TEMPLATE_TOO_LARGE", "项目模板解压后超过 64 MiB")
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise TaskError("BAD_PROJECT_TEMPLATE", f"项目模板包含非 UTF-8 文本文件：{rel}") from None
+        raw_files[rel] = text
+    # 去掉所有文件共有的唯一顶层目录。
+    rels = list(raw_files)
+    first_parts = {rel.split("/", 1)[0] for rel in rels}
+    if len(first_parts) == 1 and all("/" in rel for rel in rels):
+        prefix = next(iter(first_parts)) + "/"
+        raw_files = {rel[len(prefix):]: content for rel, content in raw_files.items()}
+    files = [
+        {"path": rel, "content": content, "editable": True}
+        for rel, content in sorted(raw_files.items())
+        if rel
+    ]
+    if not files:
+        raise TaskError("EMPTY_PROJECT_TEMPLATE", "项目模板没有可用源码文件")
+    return {"files": files, "source": "upload"}, hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
 def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
@@ -324,6 +378,7 @@ class TaskService:
         problem_url: str,
         config: dict | None = None,
         created_by: str | None = None,
+        project_archive: Path | str | None = None,
     ) -> dict:
         title = (title or "").strip()
         if not title:
@@ -364,6 +419,38 @@ class TaskService:
         problem = imported["problem"]
         template = imported["template"]
         package = imported["package"]
+        project_source = "empty"
+        project_sha = None
+        project_archive_rel = None
+        project_file_count = 0
+        if project_archive is not None:
+            upload = Path(project_archive).resolve()
+            upload_root = (self.settings.tmp_dir / "uploads").resolve()
+            if upload_root not in upload.parents or not upload.is_file():
+                shutil.rmtree(directory, ignore_errors=True)
+                raise TaskError("BAD_PROJECT_TEMPLATE", "上传的项目模板不存在或已过期")
+            try:
+                template, project_sha = _uploaded_template(upload, directory)
+            except TaskError:
+                shutil.rmtree(directory, ignore_errors=True)
+                raise
+            saved = directory / "project-template.zip"
+            shutil.copyfile(upload, saved)
+            project_archive_rel = str(saved.relative_to(self.settings.data_dir)).replace("\\", "/")
+            project_source = "upload"
+            project_file_count = len(template["files"])
+            upload.unlink(missing_ok=True)
+        else:
+            # 用户没有上传模板：明确从空项目开始，不再注入平台模板。
+            template = {"files": [], "source": "empty"}
+        if project_source == "upload":
+            normalized["project_source"] = "upload"
+            normalized["project_template_sha256"] = project_sha
+            normalized["project_template_archive"] = project_archive_rel
+            normalized["project_template_files"] = project_file_count
+        else:
+            normalized["project_source"] = "empty"
+            normalized["project_template_files"] = 0
         package_path = Path(package["archive"])
         package_rel = str(package_path.relative_to(self.settings.data_dir)).replace("\\", "/")
         problem_title = str(problem.get("name") or problem.get("title") or problem.get("_id"))
@@ -400,9 +487,20 @@ class TaskService:
                 "code_template": problem.get("code_template"),
                 "package_sha256": package.get("sha256"),
                 "files": len(package.get("files") or []),
+                "project_source": project_source,
+                "project_template_sha256": project_sha,
+                "project_template_files": project_file_count,
             },
         )
         add_event(self.db, task_id, None, "problem_imported", {"problem_url": problem_url})
+        if project_source == "upload":
+            add_event(
+                self.db,
+                task_id,
+                None,
+                "project_template_imported",
+                {"sha256": project_sha, "files": project_file_count},
+            )
         return self.get(task_id)
 
     # -- control ---------------------------------------------------------

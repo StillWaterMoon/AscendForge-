@@ -6,10 +6,13 @@
 - 不提供代码编辑工具，源码由 Codex 自己维护；
 - 参数在这里集中校验，任何工具实现都不能绕过。
 
-六个工具：
-  read_problem / read_problem_file
+五个工具：
+  read_problem
   read_server_evaluation / read_official_evaluation
   submit_server_test / submit_official
+
+项目源码由 Codex 在自己的草稿目录维护；用户可在新建任务时上传项目模板，
+平台不再提供读取模板文件的 MCP 工具。
 """
 
 from __future__ import annotations
@@ -39,31 +42,6 @@ TOOL_SPECS: list[dict[str, Any]] = [
                 }
             },
             "required": ["url"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "read_problem_file",
-        "description": (
-            "Read a problem source file. Typical paths: kernel.asc, main.asc, "
-            "reference.py, sample.py, CMakeLists.txt, run.sh. Read-only files are "
-            "returned without modification. Paths are restricted to the task files."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "minLength": 1, "maxLength": 255},
-                "source": {
-                    "type": "string",
-                    "enum": ["workspace", "snapshot", "template"],
-                    "description": "Where to read from; default: current workspace, then latest snapshot/template.",
-                },
-                "attempt_id": {
-                    "type": "string",
-                    "description": "Snapshot attempt id when source=snapshot; default latest candidate.",
-                },
-            },
-            "required": ["path"],
             "additionalProperties": False,
         },
     },

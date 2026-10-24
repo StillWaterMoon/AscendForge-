@@ -8,11 +8,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ascendforge.mcp.contracts import TOOL_NAMES, ToolArgumentError, validate_arguments
+from ascendforge.mcp.contracts import TOOL_NAMES
 from ascendforge.mcp.functions import MCPToolFunctions
 from ascendforge.mcp.server import MCPServer
 from ascendforge.mcp.server_eval import ServerEvaluationService
-from tests.helpers import make_env, seed_attempt, seed_task
+from tests.helpers import make_env, seed_task
 
 
 class MCPToolTests(unittest.TestCase):
@@ -45,12 +45,11 @@ class MCPToolTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_six_tools_are_declared(self):
+    def test_five_tools_are_declared(self):
         self.assertEqual(
             set(TOOL_NAMES),
             {
                 "read_problem",
-                "read_problem_file",
                 "read_server_evaluation",
                 "read_official_evaluation",
                 "submit_server_test",
@@ -80,24 +79,6 @@ class MCPToolTests(unittest.TestCase):
         )
         self.assertFalse(response["result"]["isError"])
         self.assertTrue(response["result"]["content"][0]["text"].startswith("# Add"))
-        file = self.functions.call("read_problem_file", {"path": "kernel.asc"})
-        self.assertEqual(file, "// current draft\n")
-        readonly = self.functions.call("read_problem_file", {"path": "main.asc", "source": "template"})
-        self.assertEqual(readonly, "// readonly main\n")
-
-    def test_file_auto_falls_back_per_file(self):
-        # 最近快照只有 kernel.asc；main.asc 仍应从题目模板读取，
-        # 不能因为“存在快照”就报 file not found。
-        seed_attempt(self.env, self.task, source="// snapshot kernel\n")
-        (self.workspace / "kernel.asc").unlink()
-        file = self.functions.call("read_problem_file", {"path": "main.asc"})
-        self.assertEqual(file, "// readonly main\n")
-
-    def test_path_traversal_is_rejected(self):
-        with self.assertRaises(Exception):
-            self.functions.call("read_problem_file", {"path": "../secret.txt"})
-        with self.assertRaises(ToolArgumentError):
-            validate_arguments("read_problem_file", {"path": "kernel.asc", "extra": 1})
 
     def test_server_evaluation_id_and_query(self):
         submitted = self.functions.call("submit_server_test", {"request_id": "req-server-1"})
@@ -118,12 +99,6 @@ class MCPToolTests(unittest.TestCase):
         messages = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {"name": "read_problem_file", "arguments": {"path": "kernel.asc"}},
-            },
         ]
         completed = subprocess.run(
             [
@@ -146,9 +121,7 @@ class MCPToolTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         responses = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "ascendforge")
-        self.assertEqual(len(responses[1]["result"]["tools"]), 6)
-        self.assertFalse(responses[2]["result"]["isError"])
-        self.assertEqual(responses[2]["result"]["content"][0]["text"], "// current draft\n")
+        self.assertEqual(len(responses[1]["result"]["tools"]), 5)
 
     def test_server_evaluation_command_runs_and_reports_logs(self):
         import time
@@ -207,7 +180,7 @@ class MCPProtocolTests(unittest.TestCase):
         )
         self.assertEqual(initialized["result"]["protocolVersion"], "2024-11-05")
         listed = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
-        self.assertEqual(len(listed["result"]["tools"]), 6)
+        self.assertEqual(len(listed["result"]["tools"]), 5)
         no_context = server.handle(
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read_problem"}}
         )

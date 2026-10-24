@@ -1,4 +1,5 @@
 import http.cookiejar
+import io
 import json
 import tempfile
 import threading
@@ -195,7 +196,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200, payload)
         task = payload["task"]
         self.assertEqual(task["title"], "API created")
-        self.assertTrue(task["template"]["files"])
+        # 没有上传项目模板时必须从空项目开始，不再注入平台模板。
+        self.assertEqual(task["template"]["files"], [])
+        self.assertEqual(task["config"]["project_source"], "empty")
         self.assertEqual(task["config"]["max_submissions_per_task"], 5)
 
         status, payload = self.client.request("GET", f"/api/tasks/{task['id']}")
@@ -240,42 +243,15 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200, payload)
         self.assertEqual(payload["task"]["messages"][-1]["content"], "下一轮优先检查 int16 的符号位")
 
+        # 空项目没有可编辑文件，不能直接提交基线。
         status, payload = self.client.request(
             "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,
         )
-        self.assertEqual(status, 200, payload)
-        attempts = payload["task"]["attempts"]
-        self.assertEqual(len(attempts), 1)
-        self.assertEqual(attempts[0]["provider"], "manual")
-        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
-
-        status, detail = self.client.request(
-            "GET", f"/api/tasks/{task['id']}/attempts/{attempts[0]['id']}"
-        )
-        self.assertEqual(status, 200, detail)
-        self.assertTrue(detail["system_prompt"])
-        self.assertIn("prompt_note", detail)
-        self.assertEqual(detail["messages"], [])
-
-        # Simulate the baseline finishing, then continue the same task with the
-        # Agent so it retains the baseline history.
-        self.env.db.execute(
-            "UPDATE tasks SET status='completed', stop_reason='manual_baseline_finished' WHERE id=?",
-            (task["id"],),
-        )
-        self.env.db.execute("UPDATE attempts SET status='finished' WHERE id=?", (attempts[0]["id"],))
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/continue-optimization",
-            {},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["status"], "running")
-        self.assertFalse(payload["task"]["config"]["manual_only"])
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "NO_EDITABLE_TEMPLATE")
 
     def _download(self, path):
         request = urllib.request.Request(
@@ -284,6 +260,57 @@ class WebTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.read()
+
+    def test_04b_project_template_upload_and_create(self):
+        fake = FakePlatform()
+        self.app.platform.resolve_and_download = lambda url, task_dir: fake.resolve_and_download(url, task_dir)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("project/kernel.asc", "// uploaded kernel\n")
+            archive.writestr("project/run.sh", "#!/usr/bin/env bash\n")
+        request = urllib.request.Request(
+            self.base + "/api/project-templates",
+            data=buffer.getvalue(),
+            method="POST",
+            headers={
+                "Content-Type": "application/zip",
+                "X-CSRF-Token": self.csrf,
+                "X-Request-Id": "upload-project-1",
+                "X-Filename": "project.zip",
+            },
+        )
+        with self.client.opener.open(request, timeout=30) as response:
+            uploaded = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(response.status, 200)
+        self.assertTrue(uploaded["upload_id"])
+        self.assertEqual(uploaded["file_count"], 2)
+
+        status, payload = self.client.request(
+            "POST",
+            "/api/tasks",
+            {
+                "title": "Uploaded project",
+                "problem_url": "https://cannjudge.cn/hc_cann_codelabs/cann/add",
+                "project_upload_id": uploaded["upload_id"],
+            },
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        task = payload["task"]
+        self.assertEqual(task["config"]["project_source"], "upload")
+        self.assertEqual(task["config"]["project_template_files"], 2)
+        self.assertEqual(
+            {item["path"] for item in task["template"]["files"]},
+            {"kernel.asc", "run.sh"},
+        )
+        status, payload = self.client.request(
+            "POST",
+            f"/api/tasks/{task['id']}/baseline-submit",
+            {"confirm": True},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
 
     def test_05_task_archive_download(self):
         data = self._download(f"/api/tasks/{self.task['id']}/archive")

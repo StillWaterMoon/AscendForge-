@@ -1,4 +1,4 @@
-"""MCP server 背后的六个 tool function 实现。
+"""MCP server 背后的五个 tool function 实现。
 
 工具只返回数据或提交 ID，不负责猜测结果：
 - 服务器测试和官方 OJ 是两条完全不同的链路；
@@ -127,42 +127,6 @@ class MCPToolFunctions:
             if item.get("editable") and str(item.get("content") or "")
         }
 
-    def _source_for_read(self, path: str, source: str, attempt_id: str | None) -> tuple[str, str, str | None]:
-        # safe_relpath 会拒绝绝对路径和 ../；之后按来源读取。
-        rel = safe_relpath(path)
-        if source == "workspace":
-            target = self.workspace / rel
-            if not target.is_file():
-                raise MCPToolError("file is not in the current workspace")
-            return target.read_text(encoding="utf-8", errors="replace"), "workspace", None
-        if source == "template":
-            item = self._template_files.get(rel)
-            if not item:
-                raise MCPToolError("file is not in the task template")
-            return str(item.get("content") or ""), "template", None
-        if source == "snapshot":
-            attempt = get_attempt(self.db, attempt_id) if attempt_id else self._latest_snapshot_attempt()
-            if not attempt or attempt.get("task_id") != self.task_id or not attempt.get("snapshot_id"):
-                raise MCPToolError("no source snapshot is available")
-            files = read_snapshot(self.db, self.settings, attempt["snapshot_id"])["files"]
-            if rel not in files:
-                raise MCPToolError("file is not in the selected snapshot")
-            return files[rel], "snapshot", attempt["id"]
-        # auto：按“当前草稿 → 最近快照 → 题目模板”逐文件判断，
-        # 不能仅因为存在快照就拒绝模板里的 main.asc/run.sh。
-        target = self.workspace / rel
-        if target.is_file():
-            return target.read_text(encoding="utf-8", errors="replace"), "workspace", None
-        attempt = self._latest_snapshot_attempt()
-        if attempt and attempt.get("snapshot_id"):
-            files = read_snapshot(self.db, self.settings, attempt["snapshot_id"])["files"]
-            if rel in files:
-                return files[rel], "snapshot", attempt["id"]
-        item = self._template_files.get(rel)
-        if item:
-            return str(item.get("content") or ""), "template", None
-        raise MCPToolError("file is not part of this task template or workspace")
-
     # ------------------------------------------------------------------
     # Read tools
     # ------------------------------------------------------------------
@@ -189,19 +153,6 @@ class MCPToolFunctions:
         if not statement.strip():
             raise MCPToolError("题目页面没有可解析的题面内容")
         return statement
-
-    def read_problem_file(self, arguments: dict) -> str:
-        # 输入相对路径；返回该文件的原文，不额外包装 JSON。
-        # source=auto 按“草稿 → 最近快照 → 模板”逐文件回退。
-        path = str(arguments["path"])
-        source = str(arguments.get("source") or "auto")
-        content, actual_source, attempt_id = self._source_for_read(
-            path, source, arguments.get("attempt_id")
-        )
-        encoded = content.encode("utf-8")
-        if len(encoded) > 512 * 1024:
-            raise MCPToolError("file exceeds 512 KiB MCP read limit")
-        return content
 
     # ------------------------------------------------------------------
     # Evaluation reads

@@ -500,6 +500,30 @@ function renderBest(best) {
   return `<span class="mono">${esc(best.raw_status || '通过')}</span>`;
 }
 
+async function uploadProjectTemplate(file) {
+  const response = await fetch('/api/project-templates', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/zip',
+      'X-CSRF-Token': state.csrf || '',
+      'X-Request-Id': uuid(),
+      'X-Filename': file.name,
+    },
+    credentials: 'same-origin',
+    body: file,
+  });
+  let data = {};
+  try { data = await response.json(); } catch (_) { data = {}; }
+  if (!response.ok) {
+    const error = data.error || { code: 'HTTP_' + response.status, message: response.statusText };
+    const err = new Error(error.message || `HTTP ${response.status}`);
+    err.code = error.code;
+    throw err;
+  }
+  return data;
+}
+
 async function openNewTaskModal() {
   const [platformData, modelData] = await Promise.all([api('/api/platform/status'), api('/api/settings/model')]);
   const connected = platformData.platform?.connected;
@@ -511,7 +535,9 @@ async function openNewTaskModal() {
       <div class="form-grid">
         <div class="field span-2"><label for="nt-title">任务标题</label><input id="nt-title" type="text" maxlength="120" placeholder="例如：Add 核函数 · 第一轮优化" required></div>
         <div class="field span-2"><label for="nt-url">CANNJudge 题目链接</label><input id="nt-url" type="url" placeholder="https://cannjudge.cn/hc_cann_codelabs/cann/add" required>
-          <div class="hint">必须是完整的小组/比赛/题目链接。导入时会下载模板并校验账号权限。</div></div>
+          <div class="hint">必须是完整的小组/比赛/题目链接；用于读取题面和官方提交。</div></div>
+        <div class="field span-2"><label for="nt-project">项目模板 ZIP（可选）</label><input id="nt-project" type="file" accept=".zip,application/zip">
+          <div class="hint">上传后 Codex 从该工程开始；不上传就是空项目，由 Codex 从 0 创建。</div></div>
         <div class="field span-2"><label for="nt-strategy">题目策略（可选）</label>
           <textarea id="nt-strategy" rows="4" maxlength="8000" placeholder="例如：本题进入性能优化阶段，重点研究 UB 分块与 DataCopy 重叠；先保证 int8/int16/int32/fp16/fp32 全部正确，再优化。"></textarea>
           <div class="hint">只放题目目标、约束和待验证假设；通用优化方法由 optimize-operator skill 提供。</div>
@@ -554,7 +580,7 @@ async function openNewTaskModal() {
     errorBox.hidden = true;
     const button = event.target.querySelector('button[type="submit"]');
     button.disabled = true;
-    button.textContent = '正在下载模板并校验账号…';
+    button.textContent = '正在创建任务…';
     const config = {};
     const putNum = (id, key, integer = true) => {
       const raw = $(id).value.trim();
@@ -579,13 +605,26 @@ async function openNewTaskModal() {
     if ($('#cfg-time-unit').value.trim()) config.time_unit = $('#cfg-time-unit').value.trim();
     if ($('#nt-strategy').value.trim()) config.strategy_prompt = $('#nt-strategy').value.trim();
     try {
+      let projectUploadId = null;
+      const file = $('#nt-project').files?.[0];
+      if (file) {
+        button.textContent = '正在上传项目模板…';
+        const uploaded = await uploadProjectTemplate(file);
+        projectUploadId = uploaded.upload_id;
+      }
+      button.textContent = '正在创建任务…';
       const data = await api('/api/tasks', {
         method: 'POST',
-        body: { title: $('#nt-title').value.trim(), problem_url: $('#nt-url').value.trim(), config },
+        body: {
+          title: $('#nt-title').value.trim(),
+          problem_url: $('#nt-url').value.trim(),
+          project_upload_id: projectUploadId,
+          config,
+        },
         requestId: uuid(),
       });
       closeModal();
-      toast('任务已创建，题目模板已保存', 'success');
+      toast(projectUploadId ? '任务已创建，项目模板已导入' : '任务已创建，空项目从 0 开始', 'success');
       navigate(`#/tasks/${data.task.id}`);
     } catch (err) {
       errorBox.hidden = false;

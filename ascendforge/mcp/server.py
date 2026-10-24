@@ -86,12 +86,8 @@ class MCPServer:
             try:
                 validate_arguments(name, arguments)
                 result = self.functions.call(name, arguments)
-                # 读取类工具直接返回原文 Markdown/源码，不再包一层 JSON。
-                text = (
-                    result
-                    if name in ("read_problem", "read_problem_file") and isinstance(result, str)
-                    else _json_text(result)
-                )
+                # read_problem 直接返回题面 Markdown，不再包一层 JSON。
+                text = result if name == "read_problem" and isinstance(result, str) else _json_text(result)
                 return self._result(
                     request_id,
                     {"content": [{"type": "text", "text": text}], "isError": False},

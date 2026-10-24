@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **121 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **123 passed**
 
 状态含义：
 
@@ -27,7 +27,8 @@
 | 新版本失败/退化不覆盖 best | PASS (unit) | `test_best_only_replaced_by_comparable_improvement` |
 | 数据由 Agent 生成，参考实现与校验可独立核对 | PASS (unit) | `test_local_validation`：生成器/参考实现在隔离执行器跑通；候选仍为 unavailable |
 | 无 NPU 和不支持自定义远端测试明确展示 | PASS (unit) + UI | 能力检测、`candidate_execution=unavailable`、`custom_tests=false` |
-| 任务级 MCP 六工具、ID 查询、快照哈希、请求幂等 | PASS (unit/stdio) | `test_mcp`：工具 schema、stdio handshake、服务器/官方提交、request_id 复用、源码遍历防护；服务器固定测试命令实测返回日志 |
+| 任务级 MCP 五工具、ID 查询、快照哈希、请求幂等 | PASS (unit/stdio) | `test_mcp`：工具 schema、stdio handshake、服务器/官方提交、request_id 复用；服务器固定测试命令实测返回日志 |
+| 新建任务上传项目模板 ZIP / 可选空项目 | PASS (unit/HTTP) | `test_project_template`：ZIP 解压、单根目录归一、空项目、路径穿越拒绝；`test_web`：上传接口 + 创建任务 + 基线提交 |
 | 凭据不进模型上下文/实验文件，生成代码隔离 | PASS (unit) | 加密、掩码、环境清洗、档案扫描无 key |
 | 最终报告区分真实/mock/未验证 | PASS | 本文 + README + phase0 |
 

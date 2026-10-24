@@ -2,7 +2,7 @@
 
 This folder contains the task-scoped MCP integration:
 
-- `contracts.py` — the six tool schemas and argument validation;
+- `contracts.py` — the five tool schemas and argument validation;
 - `functions.py` — read/submit tool implementations;
 - `server_eval.py` — fixed-test NPU server evaluation backend;
 - `server.py` — stdio MCP server.

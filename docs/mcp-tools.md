@@ -12,7 +12,7 @@
 
 ```text
 ascendforge/mcp/contracts.py    工具定义、参数校验
-ascendforge/mcp/functions.py    六个 tool function 的实现
+ascendforge/mcp/functions.py    五个 tool function 的实现
 ascendforge/mcp/server_eval.py  固定测试集 NPU 服务器评测后端
 ascendforge/mcp/server.py       stdio MCP server
 tests/test_mcp.py               工具和协议测试
@@ -50,12 +50,11 @@ args = [
 env = { PYTHONPATH = "D:\\AscendForge", ASCENDFORGE_DATA_DIR = "D:\\AscendForge\\data" }
 ```
 
-## 六个工具
+## 五个工具
 
 | 类别 | 工具 | 作用 | 返回唯一 ID |
 |---|---|---|---|
-| 读取 | `read_problem` | 题面、接口/精度、文件目录、可修改范围 | — |
-| 读取 | `read_problem_file` | 读取 `kernel.asc` 及按需文件 | — |
+| 读取 | `read_problem` | 按题目 URL 读取完整题面 | — |
 | 读取 | `read_server_evaluation` | 查询服务器固定测试结果 | 用 `evaluation_id` |
 | 读取 | `read_official_evaluation` | 查询官方 OJ 提交结果 | 用 `submission_id` |
 | 提交 | `submit_server_test` | 提交服务器固定测试 | 返回 `evaluation_id` |
@@ -91,45 +90,7 @@ MCP 的 `content[0].text` 就是题面原文，例如：
 AddN 是多路输入逐元素累加算子...
 ```
 
-### 2. `read_problem_file`
-
-参数：
-
-```json
-{
-  "path": "kernel.asc",
-  "source": "workspace",
-  "attempt_id": null
-}
-```
-
-- `path` 必须是题目模板或当前草稿中的相对路径，禁止 `../` 和绝对路径；
-- `source`：
-  - `workspace`：当前草稿；
-  - `snapshot`：指定/最近一次候选快照；
-  - `template`：原始题目模板；
-  - 省略时按文件逐个回退：workspace → 最近快照 → template；
-- 单文件最多 512 KiB；
-- **返回文件原文，不再包 JSON、hash、editable 等元数据**；
-- 文件不存在或路径非法时，MCP 返回 `isError=true`。
-
-典型读取：
-
-```json
-{"path": "main.asc"}
-{"path": "reference.py"}
-{"path": "CMakeLists.txt"}
-{"path": "run.sh"}
-{"path": "kernel.asc", "source": "snapshot", "attempt_id": "att_xxx"}
-```
-
-MCP 返回：
-
-```text
-// readonly main
-```
-
-### 3. `read_server_evaluation`
+### 2. `read_server_evaluation`
 
 参数：
 
@@ -157,7 +118,7 @@ MCP 返回：
 
 服务器测试使用题目自带的 `run.sh` 固定测试入口：编译、生成固定测试数据、运行 kernel、用 `sample.py verify` 检查。它**不是**官方测试结果，覆盖范围以 `coverage` 为准。
 
-### 4. `read_official_evaluation`
+### 3. `read_official_evaluation`
 
 参数：
 
@@ -186,7 +147,7 @@ MCP 返回：
 
 `source_sha256` 来自提交时绑定的快照；用它可以确认结果属于哪份代码。
 
-### 5. `submit_server_test`
+### 4. `submit_server_test`
 
 参数：
 
@@ -223,7 +184,7 @@ ASCENDFORGE_SERVER_EVAL_TIMEOUT=900
 
 只在配置了 CANN/NPU、测试数据、可信参考实现和调用入口的机器上启用。命令在提交快照的临时副本中执行；未启用时返回 `not_configured`，不会伪造设备结果。
 
-### 6. `submit_official`
+### 5. `submit_official`
 
 参数：
 
@@ -305,7 +266,6 @@ db.init()
 tools = MCPToolFunctions(settings, db, "task_xxx", workspace="/path/to/draft")
 
 problem = tools.call("read_problem", {"url": "https://cannjudge.cn/public/vector/addn"})
-kernel = tools.call("read_problem_file", {"path": "kernel.asc"})
 submitted = tools.call("submit_official", {"request_id": "round-42"})
 result = tools.call("read_official_evaluation", {"submission_id": submitted["submission_id"]})
 ```

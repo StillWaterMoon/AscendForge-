@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import logging
 import mimetypes
@@ -232,6 +233,7 @@ class App:
             ("GET", r"^/api/summary$", "h_summary", False, True),
             ("GET", r"^/api/tasks$", "h_tasks_list", False, True),
             ("POST", r"^/api/tasks$", "h_tasks_create", False, False),
+            ("POST", r"^/api/project-templates$", "h_project_template_upload", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
@@ -329,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
     def _client_ip(self) -> str:
         return str(self.client_address[0]) if self.client_address else "unknown"
 
-    def _read_body(self) -> bytes:
+    def _read_body(self, *, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         length = self.headers.get("Content-Length")
         if length is None:
             return b""
@@ -339,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "BAD_BODY", "invalid Content-Length") from None
         if size <= 0:
             return b""
-        if size > MAX_BODY_BYTES:
+        if size > max_bytes:
             raise ApiError(413, "BODY_TOO_LARGE", "request body too large")
         return self.rfile.read(size)
 
@@ -431,7 +433,13 @@ class Handler(BaseHTTPRequestHandler):
             # parse it.  Otherwise a keep-alive client that sends `{}` on a POST
             # leaves those bytes in the socket and the next request line becomes
             # "{}GET ..." (observed as HTTP 501 on the dashboard).
-            self._body_raw = self._read_body()
+            # 项目模板上传允许更大的包，其余 JSON 请求仍限制在 2 MiB。
+            body_limit = (
+                max(1, int(self.app.settings.max_package_mb)) * 1024 * 1024
+                if path == "/api/project-templates"
+                else MAX_BODY_BYTES
+            )
+            self._body_raw = self._read_body(max_bytes=body_limit)
             if method == "GET" and path in ("/", "/index.html"):
                 self._serve_static("index.html", "text/html; charset=utf-8")
                 return
@@ -712,13 +720,74 @@ class Handler(BaseHTTPRequestHandler):
             )
         return 200, {"tasks": items}
 
+    def h_project_template_upload(self, session: dict | None = None, **_):
+        """接收浏览器上传的项目模板 ZIP，只做存储和基础校验。
+
+        真正的安全解压发生在任务创建时。这里先限制原始大小、ZIP 文件数
+        和解压后大小，避免把一个几十 GB 的 zip bomb 留在磁盘上。
+        """
+        raw = self._body_raw if self._body_raw is not None else b""
+        max_bytes = max(1, int(self.app.settings.max_package_mb)) * 1024 * 1024
+        if not raw:
+            raise ApiError(400, "EMPTY_UPLOAD", "请选择一个 ZIP 项目模板")
+        if not zipfile.is_zipfile(io.BytesIO(raw)):
+            raise ApiError(400, "BAD_ZIP", "项目模板必须是有效的 ZIP 文件")
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                infos = [info for info in archive.infolist() if not info.is_dir()]
+                if not infos:
+                    raise ApiError(400, "EMPTY_UPLOAD", "ZIP 中没有文件")
+                if len(infos) > 500:
+                    raise ApiError(400, "TOO_MANY_FILES", "ZIP 文件数量超过 500")
+                total = sum(int(info.file_size) for info in infos)
+                if total > max(64 * 1024 * 1024, max_bytes * 4):
+                    raise ApiError(413, "ZIP_TOO_LARGE", "ZIP 解压后过大")
+                for info in infos:
+                    name = info.filename.replace("\\", "/")
+                    if name.startswith("/") or any(part in ("", ".", "..") for part in name.split("/")):
+                        raise ApiError(400, "BAD_ZIP_PATH", "ZIP 包含非法路径")
+        except zipfile.BadZipFile:
+            raise ApiError(400, "BAD_ZIP", "项目模板 ZIP 已损坏") from None
+        upload_id = new_id("upload")
+        upload_dir = self.app.settings.tmp_dir / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        target = upload_dir / f"{upload_id}.zip"
+        target.write_bytes(raw)
+        filename = (self.headers.get("X-Filename") or "project-template.zip").strip()[:120]
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                session["username"] if session else None,
+                "project_template_upload",
+                upload_id,
+                canonical_json({"bytes": len(raw), "files": len(infos)}),
+                now(),
+            ),
+        )
+        return 200, {
+            "upload_id": upload_id,
+            "filename": filename,
+            "bytes": len(raw),
+            "file_count": len(infos),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
     def h_tasks_create(self, session: dict | None = None, **_):
         body = self._read_json()
+        upload_id = str(body.get("project_upload_id") or "").strip()
+        project_archive = None
+        if upload_id:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", upload_id):
+                raise ApiError(400, "BAD_UPLOAD_ID", "项目模板上传 ID 非法")
+            project_archive = self.app.settings.tmp_dir / "uploads" / f"{upload_id}.zip"
+            if not project_archive.is_file():
+                raise ApiError(400, "UPLOAD_NOT_FOUND", "项目模板上传已过期，请重新上传")
         task = self.app.tasks.create(
             title=str(body.get("title") or ""),
             problem_url=str(body.get("problem_url") or ""),
             config=body.get("config") if isinstance(body.get("config"), dict) else {},
             created_by=session["user_id"] if session else None,
+            project_archive=project_archive,
         )
         self.app.db.insert(
             "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
