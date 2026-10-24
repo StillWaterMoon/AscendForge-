@@ -7,7 +7,7 @@
 
 | 项目 | 结论 |
 |---|---|
-| AscendForge 自身闭环 | 已实现并测试（110 个 unittest） |
+| AscendForge 自身闭环 | 已实现并测试（112 个 unittest） |
 | CANNJudge 公开题目/模板/ZIP | **真实联网验证通过** |
 | CANNJudge 登录 | **真实登录已由用户在 Web 完成**（账号已连接，题目权限已验证，密码未保存） |
 | CANNJudge 真实提交/结果 | **已完成（2026-10-21）**：CopySign 模板基线 remote id `6ad84d04193e507d8e4a0502`，返回 `Runtime Error`（0/15）；提交字节/快照一致，结果可独立读回 |

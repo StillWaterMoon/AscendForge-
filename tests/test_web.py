@@ -302,6 +302,25 @@ class WebTests(unittest.TestCase):
         attempt = self._download(f"/api/tasks/{self.task['id']}/attempts/{self.attempt['id']}/download")
         self.assertTrue(attempt.startswith(b"PK"))
 
+    def test_05_codex_run_endpoint_starts_runner(self):
+        from unittest.mock import patch
+
+        with patch("ascendforge.web.subprocess.Popen") as popen:
+            popen.return_value.pid = 43210
+            status, payload = self.client.request(
+                "POST",
+                f"/api/tasks/{self.task['id']}/codex-run",
+                {"rounds": 2, "prompt": "only test"},
+                csrf=self.csrf,
+            )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload["started"])
+        self.assertEqual(payload["pid"], 43210)
+        task = self.env.tasks.get(self.task["id"])
+        self.assertEqual(task["config"]["execution_mode"], "codex")
+        self.assertTrue(task["config"]["codex_runner_active"])
+        self.assertEqual(task["config"]["codex_runner_pid"], 43210)
+
     def test_06_logout(self):
         status, payload = self.client.request("POST", "/api/auth/logout", {}, csrf=self.csrf)
         self.assertEqual(status, 200)
