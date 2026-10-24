@@ -23,6 +23,7 @@ from .config import Settings
 from .db import Database
 from .experiment_service import ensure_active
 from .experiments import (
+    add_event,
     attach_snapshot,
     create_attempt,
     current_attempt,
@@ -43,6 +44,80 @@ class CodexLoopError(RuntimeError):
     pass
 
 
+CLI_TOOL_SPECS = [
+    {
+        "type": "function",
+        "name": "task_status",
+        "description": "Read current task status, best/working attempts, pending submission and platform limits.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "read_problem",
+        "description": "Read the imported problem contract and testcase count.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "read_history",
+        "description": "List recent attempts with status, hypothesis and normalized result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 30}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_attempt_source",
+        "description": "Read a complete source snapshot by attempt id (default: current parent).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"attempt_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_workspace",
+        "description": "List the workspace files and return the current editable source contents.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "save_candidate",
+        "description": "Validate the current workspace changes and save them as an immutable candidate snapshot without submitting.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"hypothesis": {"type": "string"}},
+            "required": ["hypothesis"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "submit_candidate",
+        "description": "Validate the current workspace changes, save an immutable snapshot, submit it to the host scheduler, wait for the real remote result, and return the result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"hypothesis": {"type": "string"}},
+            "required": ["hypothesis"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "query_submission",
+        "description": "Read the latest submission state/result, or a specific submission_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"submission_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+]
+
+
 def _services(settings: Settings) -> tuple[Database, TaskService, Scheduler, Worker]:
     db = Database(settings.db_path)
     db.init()
@@ -53,6 +128,17 @@ def _services(settings: Settings) -> tuple[Database, TaskService, Scheduler, Wor
     scheduler = Scheduler(db, settings, platform, tasks)
     worker = Worker(settings)
     return db, tasks, scheduler, worker
+
+
+def _workspace_files(workspace: Path) -> dict[str, str]:
+    files = {}
+    for path in sorted(Path(workspace).rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name in ("TASK.json", "AGENTS.md", "codex-tools.json"):
+            continue
+        files[str(path.relative_to(workspace)).replace("\\", "/")] = path.read_text(encoding="utf-8")
+    return files
 
 
 def _template_files(task: dict) -> dict[str, str]:
@@ -112,6 +198,322 @@ def _wait_submission(db: Database, scheduler: Scheduler, worker: Worker, submiss
     raise CodexLoopError(f"submission {submission_id} did not finish within {timeout_sec}s")
 
 
+def run_codex_agent(
+    settings: Settings,
+    task_id: str,
+    *,
+    prompt: str = "",
+    timeout_sec: float = 1800,
+    submission_timeout: float = 1200,
+    keep_running: bool = False,
+    lock_token: str | None = None,
+) -> dict:
+    """Tool-driven Codex session; no fixed round count.
+
+    Codex owns the conversation and decides when to call save/submit/query
+    tools. The host owns workspace preparation, immutable snapshots, scheduler
+    rate limits and the prompt/session lifetime.
+    """
+    db, tasks, scheduler, worker = _services(settings)
+    task = tasks.get(task_id)
+    if task["status"] == "pending":
+        tasks.start(task_id)
+    elif task["status"] == "paused":
+        tasks.resume(task_id)
+    elif task["status"] != "running":
+        raise CodexLoopError(f"task is {task['status']}; use Web continue/start before Codex loop")
+    config = dict(task.get("config") or {})
+    token = lock_token or new_id("codexrun")
+    if config.get("codex_runner_active") and config.get("codex_runner_token") not in (None, token):
+        raise CodexLoopError("another Codex runner owns this task")
+    config.update(
+        {
+            "execution_mode": "codex",
+            "codex_runner_active": True,
+            "codex_runner_token": token,
+            "codex_runner_status": "running",
+        }
+    )
+    db.execute(
+        "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+        (json_dumps(config), now(), task_id),
+    )
+    experiment = ensure_active(db, task_id)
+    parent_id, parent_files = _parent_source(db, settings, task)
+    workspace_root = Path(settings.data_dir) / "cli_workspaces" / task_id
+    workspace = workspace_root / "workspace"
+    if not workspace.exists():
+        # The adapter is needed for prepare_workspace; defer actual creation
+        # until after the app-server is available.
+        pass
+    session_ref: str | None = config.get("codex_session_ref")
+    state = {
+        "parent_id": parent_id,
+        "parent_files": dict(parent_files),
+        "saved_attempt_id": None,
+        "last_submission_id": None,
+        "last_result": None,
+    }
+    history: list[dict] = []
+    adapter: AppServerAdapter | None = None
+
+    def on_event(event) -> None:
+        if event.type == "thread.started" and event.raw.get("thread_id"):
+            config["codex_session_ref"] = str(event.raw["thread_id"])
+            config["codex_runner_status"] = "running"
+            db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            add_event(db, task_id, None, "codex_thread_started", {"thread_id": config["codex_session_ref"]})
+
+    def collect_effective() -> tuple[dict[str, str], dict]:
+        workspace_files = {}
+        for path in sorted(workspace.rglob("*")):
+            if path.is_file() and path.name not in ("TASK.json", "AGENTS.md", "codex-tools.json"):
+                workspace_files[str(path.relative_to(workspace)).replace("\\", "/")] = path.read_text(
+                    encoding="utf-8"
+                )
+        changes = {
+            path: content
+            for path, content in workspace_files.items()
+            if content != state["parent_files"].get(path)
+        }
+        if not changes:
+            raise ValueError("workspace has no source changes to save")
+        files = dict(state["parent_files"])
+        files.update(workspace_files)
+        audit = audit_candidate(state["parent_files"], files)
+        if not audit["effective"]:
+            raise ValueError("workspace changes are comments/whitespace only")
+        check = preflight_candidate(files, json_loads(task.get("problem_json"), {}))
+        if not check["ok"]:
+            raise ValueError("preflight failed: " + "; ".join(item["message"] for item in check["errors"][:5]))
+        return files, audit
+
+    def tool_handler(tool: str, arguments: dict, raw: dict) -> dict:
+        if tool == "task_status":
+            current = tasks.get(task_id)
+            return {
+                "task_id": task_id,
+                "status": current["status"],
+                "best_attempt_id": current.get("best_attempt_id"),
+                "performance_best_attempt_id": current.get("performance_best_attempt_id"),
+                "experiment": experiment.get("id"),
+                "parent_attempt_id": state["parent_id"],
+                "last_submission_id": state["last_submission_id"],
+            }
+        if tool == "read_problem":
+            problem = json_loads(task.get("problem_json"), {})
+            return {
+                "problem_id": problem.get("_id"),
+                "name": problem.get("name"),
+                "description": problem.get("desc") or problem.get("description"),
+                "testcase_count": len(problem.get("testcases") or []),
+                "code_template": problem.get("code_template"),
+            }
+        if tool == "read_history":
+            limit = max(1, min(30, int(arguments.get("limit") or 10)))
+            rows = db.query(
+                "SELECT ordinal,id,status,hypothesis,normalized_json,error_code FROM attempts "
+                "WHERE task_id=? ORDER BY ordinal DESC LIMIT ?",
+                (task_id, limit),
+            )
+            return [
+                {
+                    "ordinal": row["ordinal"],
+                    "attempt_id": row["id"],
+                    "status": row["status"],
+                    "hypothesis": (row.get("hypothesis") or "")[:1000],
+                    "normalized": json_loads(row.get("normalized_json"), {}),
+                    "error_code": row.get("error_code"),
+                }
+                for row in rows
+            ]
+        if tool == "read_attempt_source":
+            attempt_id = str(arguments.get("attempt_id") or state["parent_id"] or "")
+            attempt = get_attempt(db, attempt_id) if attempt_id else None
+            if not attempt or not attempt.get("snapshot_id"):
+                raise ValueError("attempt has no source snapshot")
+            return read_snapshot(db, settings, attempt["snapshot_id"])["files"]
+        if tool == "read_workspace":
+            return _workspace_files(workspace)
+        if tool in ("save_candidate", "submit_candidate"):
+            files, audit = collect_effective()
+            hypothesis = str(arguments.get("hypothesis") or "Codex candidate").strip()[:4000]
+            attempt = create_attempt(
+                db,
+                task_id,
+                parent_attempt_id=state["parent_id"],
+                experiment_id=experiment["id"],
+                provider="codex-cli",
+                model="codex",
+                prompt_version="codex-tool-v1",
+            )
+            update_attempt(
+                db,
+                attempt["id"],
+                hypothesis=hypothesis,
+                status="local_checking",
+                changed_files_json=json_dumps(
+                    {"files": sorted(files), "source": "codex-workspace", "audit": audit}
+                ),
+            )
+            snapshot = attach_snapshot(
+                db,
+                settings,
+                task_id=task_id,
+                attempt_id=attempt["id"],
+                files=files,
+            )
+            update_attempt(db, attempt["id"], snapshot_id=snapshot["id"], status="generated")
+            state["parent_id"] = attempt["id"]
+            state["parent_files"] = dict(files)
+            state["saved_attempt_id"] = attempt["id"]
+            if tool == "save_candidate":
+                return {
+                    "attempt_id": attempt["id"],
+                    "snapshot_id": snapshot["id"],
+                    "submitted": False,
+                    "hypothesis": hypothesis,
+                }
+            submission = scheduler.request_submission(task_id, attempt["id"])
+            row = _wait_submission(db, scheduler, worker, submission["id"], submission_timeout)
+            normalized = json_loads(
+                db.query_one("SELECT normalized_json FROM attempts WHERE id=?", (attempt["id"],))[
+                    "normalized_json"
+                ],
+                {},
+            )
+            state["last_submission_id"] = submission["id"]
+            state["last_result"] = normalized
+            return {
+                "attempt_id": attempt["id"],
+                "snapshot_id": snapshot["id"],
+                "submission_id": submission["id"],
+                "state": row["state"],
+                "remote_id": row.get("remote_id"),
+                "result": normalized,
+            }
+        if tool == "query_submission":
+            submission_id = arguments.get("submission_id") or state["last_submission_id"]
+            if not submission_id:
+                return {"state": None, "note": "no submission has been made"}
+            row = db.query_one("SELECT * FROM submissions WHERE id=?", (submission_id,))
+            if not row:
+                raise ValueError("submission not found")
+            attempt = get_attempt(db, row.get("attempt_id") or "")
+            return {
+                "submission_id": row["id"],
+                "state": row["state"],
+                "remote_id": row.get("remote_id"),
+                "error_code": row.get("error_code"),
+                "normalized": json_loads(attempt.get("normalized_json"), {}) if attempt else {},
+            }
+        raise ValueError(f"unknown tool: {tool}")
+
+    try:
+        adapter = AppServerAdapter(
+            timeout_sec=timeout_sec,
+            on_event=on_event,
+            on_tool_call=tool_handler,
+            tools=CLI_TOOL_SPECS,
+        )
+        if not workspace.exists():
+            workspace = adapter.prepare_workspace(
+                workspace_root,
+                parent_files,
+                task_meta={
+                    "task_id": task_id,
+                    "title": task.get("title"),
+                    "problem_title": task.get("problem_title"),
+                    "problem_url": task.get("problem_url"),
+                    "performance_best": task.get("performance_best_attempt_id"),
+                },
+                instructions="Use the provided dynamic tools; do not attempt to submit outside them.",
+            )
+        skill_path = Path(settings.root) / "skills" / "start-operator-optimization" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8") if skill_path.exists() else ""
+        startup = (
+            "使用 start-operator-optimization 开展持续算子优化。\n"
+            f"任务 ID：{task_id}\n工作目录：{workspace}\n"
+            "通过已连接的工具读取任务、历史、源码，保存候选并提交真实评测。\n"
+            "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
+            "每次提交后必须根据真实结果决定修复、继续、回退或更换方向。\n\n"
+            + skill_text
+            + "\n\n"
+            + (prompt or "")
+        )
+        turns = 0
+        while True:
+            current = tasks.get(task_id)
+            if current["status"] != "running":
+                break
+            instruction = startup if turns == 0 and not session_ref else (
+                "继续自主优化。读取最新提交结果，决定下一步；使用工具保存/提交候选。"
+                "不要等待用户逐步指挥，直到用户暂停或停止。"
+            )
+            if session_ref:
+                result = adapter.resume(
+                    session_ref, instruction, workspace=workspace, output_file=workspace_root / "last.txt"
+                )
+            else:
+                result = adapter.start(
+                    instruction,
+                    workspace=workspace,
+                    output_file=workspace_root / "last.txt",
+                    sandbox="workspace-write",
+                )
+            session_ref = result.session_ref or session_ref
+            if session_ref:
+                config["codex_session_ref"] = session_ref
+                db.execute(
+                    "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                    (json_dumps(config), now(), task_id),
+                )
+            _record_run(
+                db,
+                task_id=task_id,
+                attempt_id=state.get("saved_attempt_id"),
+                workspace=workspace,
+                result=result,
+                changed=sorted(_workspace_files(workspace)),
+                started=now(),
+            )
+            turns += 1
+            if result.timed_out or result.exit_code not in (0, None):
+                add_event(db, task_id, None, "codex_turn_failed", {"error": result.error, "stderr": result.stderr[-1000:]})
+                break
+            history.append({"turn": turns, "thread": session_ref, "last": result.last_message[:1000]})
+            if tasks.get(task_id)["status"] != "running":
+                break
+            time.sleep(2)
+        return {"task_id": task_id, "turns": turns, "history": history, "session_ref": session_ref}
+    finally:
+        if adapter:
+            try:
+                adapter.close()
+            except Exception:
+                pass
+        try:
+            current_task = tasks.get(task_id)
+            current_config = dict(current_task.get("config") or {})
+            if current_config.get("codex_runner_token") == token:
+                current_config.pop("codex_runner_active", None)
+                current_config.pop("codex_runner_pid", None)
+                current_config.pop("codex_runner_token", None)
+                current_config["codex_runner_status"] = "finished"
+            current_config["execution_mode"] = "codex"
+            db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(current_config), now(), task_id),
+            )
+            if not keep_running and current_task["status"] == "running":
+                tasks.pause(task_id, reason="codex_session_finished")
+        except Exception:
+            pass
+
+
 def run_codex_loop(
     settings: Settings,
     task_id: str,
@@ -121,6 +523,7 @@ def run_codex_loop(
     timeout_sec: float = 900,
     submission_timeout: float = 1200,
     keep_running: bool = False,
+    lock_token: str | None = None,
 ) -> dict:
     db, tasks, scheduler, worker = _services(settings)
     task = tasks.get(task_id)
@@ -131,12 +534,34 @@ def run_codex_loop(
     elif task["status"] != "running":
         raise CodexLoopError(f"task is {task['status']}; use Web continue/start before Codex loop")
     config = dict(task.get("config") or {})
+    token = lock_token or new_id("codexrun")
+    if config.get("codex_runner_active") and config.get("codex_runner_token") not in (None, token):
+        raise CodexLoopError("another Codex runner owns this task")
     config["execution_mode"] = "codex"
+    config["codex_runner_active"] = True
+    config["codex_runner_token"] = token
+    config["codex_runner_status"] = "starting"
     db.execute(
         "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
         (json_dumps(config), now(), task_id),
     )
-    adapter = AppServerAdapter(timeout_sec=timeout_sec)
+    def _on_event(event) -> None:
+        if event.type == "thread.started" and event.raw.get("thread_id"):
+            config["codex_session_ref"] = str(event.raw["thread_id"])
+            config["codex_runner_status"] = "running"
+            db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            add_event(
+                db,
+                task_id,
+                None,
+                "codex_thread_started",
+                {"thread_id": config["codex_session_ref"]},
+            )
+
+    adapter = AppServerAdapter(timeout_sec=timeout_sec, on_event=_on_event)
     experiment = ensure_active(db, task_id)
     base_parent, base_files = _parent_source(db, settings, task)
     workspace_root = Path(settings.data_dir) / "cli_workspaces" / task_id
@@ -332,9 +757,11 @@ def run_codex_loop(
         try:
             current_task = tasks.get(task_id)
             current_config = dict(current_task.get("config") or {})
-            current_config.pop("codex_runner_active", None)
-            current_config.pop("codex_runner_pid", None)
-            current_config["codex_runner_status"] = "finished"
+            if current_config.get("codex_runner_token") == token:
+                current_config.pop("codex_runner_active", None)
+                current_config.pop("codex_runner_pid", None)
+                current_config.pop("codex_runner_token", None)
+                current_config["codex_runner_status"] = "finished"
             current_config["execution_mode"] = "codex"
             db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",

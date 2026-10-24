@@ -672,6 +672,7 @@ async function renderTask(taskId) {
       <span class="experiment-title">Codex 运行中</span>
       <span>PID <b class="mono">${esc(task.config.codex_runner_pid || '—')}</b></span>
       <span>${esc(task.config.codex_runner_status || 'running')}</span>
+      ${task.config.codex_session_ref ? `<span>thread <b class="mono">${esc(task.config.codex_session_ref)}</b></span>` : ''}
       ${task.config.codex_runner_log ? `<span class="mono">${esc(String(task.config.codex_runner_log).split(/[\\/]/).pop())}</span>` : ''}
     </div>` : ''}
     ${!task.config?.codex_runner_active && task.config?.codex_session_ref ? `<div class="experiment-strip codex-run-strip">
@@ -820,8 +821,7 @@ async function openBudgetModal(task) {
 async function openCodexModal(task) {
   openModal('本地 Codex 运行', `
     <form id="codex-form" class="stack">
-      <div class="alert info">Codex 会在本地工作区修改源码；宿主负责保存快照并走现有调度器提交。Codex 不能直接提交 CANNJudge，也不能访问凭据。默认结束后暂停任务。</div>
-      <div class="field"><label for="codex-rounds">轮数（1–5）</label><input id="codex-rounds" type="number" min="1" max="5" value="1"></div>
+      <div class="alert info">Codex 会建立一个持续会话，通过已注册的工具读写任务、保存候选和提交评测；没有固定轮数，只有你手动暂停/停止才会结束。Codex 不能直接提交 CANNJudge，也不能访问凭据。</div>
       <div class="field"><label for="codex-prompt">额外优化指令（可选）</label><textarea id="codex-prompt" rows="4" placeholder="例如：只做 float32 的向量化；保持其他 dtype 和接口不变。"></textarea></div>
       <div class="faint small">运行日志会写入服务器日志目录；不会把 Codex 的私有推理当作文本保存。</div>
       <div class="alert error" id="codex-error" hidden></div>
@@ -840,7 +840,6 @@ async function openCodexModal(task) {
       const data = await api(`/api/tasks/${encodeURIComponent(task.id)}/codex-run`, {
         method: 'POST',
         body: {
-          rounds: Number($('#codex-rounds').value),
           prompt: $('#codex-prompt').value,
         },
         requestId: uuid(),

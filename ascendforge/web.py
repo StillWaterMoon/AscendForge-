@@ -1023,10 +1023,6 @@ class Handler(BaseHTTPRequestHandler):
             add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
             task = self.app.tasks.get(task_id)
         body = self._read_json()
-        try:
-            rounds = max(1, min(5, int(body.get("rounds") or 1)))
-        except (TypeError, ValueError):
-            raise ApiError(400, "BAD_ROUNDS", "rounds 必须是 1..5") from None
         prompt = str(body.get("prompt") or "").strip()
         if len(prompt) > 8000:
             raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
@@ -1035,6 +1031,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(409, "CODEX_ALREADY_RUNNING", "该任务已有 Codex 运行中")
         config["execution_mode"] = "codex"
         config["codex_runner_active"] = True
+        runner_token = new_id("codexrun")
+        config["codex_runner_token"] = runner_token
         log_path = self.app.settings.logs_dir / f"codex-{task_id}-{int(now())}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
@@ -1044,8 +1042,8 @@ class Handler(BaseHTTPRequestHandler):
             "codex-loop",
             "--task",
             task_id,
-            "--rounds",
-            str(rounds),
+            "--lock-token",
+            runner_token,
         ]
         if prompt:
             command.extend(["--prompt", prompt])
@@ -1073,6 +1071,7 @@ class Handler(BaseHTTPRequestHandler):
             config.pop("codex_runner_active", None)
             config.pop("codex_runner_log", None)
             config.pop("codex_runner_status", None)
+            config.pop("codex_runner_token", None)
             self.app.db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(config), now(), task_id),
@@ -1092,12 +1091,12 @@ class Handler(BaseHTTPRequestHandler):
             task_id,
             None,
             "codex_run_started",
-            {"pid": process.pid, "rounds": rounds, "log": str(log_path), "actor": (session or {}).get("username")},
+            {"pid": process.pid, "mode": "continuous_until_manual_pause", "log": str(log_path), "actor": (session or {}).get("username")},
         )
         return 200, {
             "started": True,
             "pid": process.pid,
-            "rounds": rounds,
+            "mode": "continuous_until_manual_pause",
             "log": str(log_path),
             "task": self.app.tasks.get(task_id),
         }

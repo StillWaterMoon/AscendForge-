@@ -27,29 +27,52 @@ def _free_port() -> int:
 class AppServerAdapter:
     name = "codex-app-server"
 
-    def __init__(self, executable: str | None = None, *, timeout_sec: float = 1800):
+    def __init__(
+        self,
+        executable: str | None = None,
+        *,
+        timeout_sec: float = 1800,
+        on_event=None,
+        on_tool_call=None,
+        tools: list[dict] | None = None,
+    ):
         probe = probe_codex()
         self.executable = executable or probe.get("executable") or "codex.cmd"
         self.timeout_sec = timeout_sec
+        self.on_event = on_event
+        self.on_tool_call = on_tool_call
+        self.tools = tools or []
         self.node = shutil.which("node") or "node"
         self.port = _free_port()
         self.server = subprocess.Popen(
             [self.executable, "app-server", "--listen", f"ws://127.0.0.1:{self.port}"],
-            stdin=subprocess.DEVNULL,
+            # app-server treats stdin EOF as a shutdown signal; keep it open.
+            stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
         )
         # The server binds quickly; a short retry is cheaper than guessing.
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
+            if self.server.poll() is not None:
+                break
             try:
                 with socket.create_connection(("127.0.0.1", self.port), timeout=0.5):
                     return
             except OSError:
                 time.sleep(0.15)
+        detail = ""
+        try:
+            if self.server.poll() is None:
+                self.server.terminate()
+                self.server.wait(timeout=3)
+            if self.server.stderr:
+                detail = self.server.stderr.read(2000)
+        except Exception:
+            pass
         self.close()
-        raise RuntimeError("Codex app-server did not start")
+        raise RuntimeError(f"Codex app-server did not start: {detail[-1000:]}")
 
     def close(self) -> None:
         if getattr(self, "server", None) and self.server.poll() is None:
@@ -91,33 +114,81 @@ class AppServerAdapter:
 
     def _turn(self, prompt: str, workspace: Path, thread: str | None, output_file: Path) -> CodexRunResult:
         script = Path(__file__).with_name("app_server_turn.mjs")
+        tools_file = Path(output_file).parent / "codex-tools.json"
+        tools_file.write_text(json.dumps(self.tools, ensure_ascii=False), encoding="utf-8")
+        prompt_file = Path(output_file).parent / "codex-prompt.txt"
+        prompt_file.write_text(prompt, encoding="utf-8")
         command = [
             self.node,
             str(script),
             f"port={self.port}",
             f"cwd={workspace}",
-            f"prompt={prompt}",
+            f"prompt_file={prompt_file}",
             f"thread={thread or ''}",
+            f"tools_file={tools_file}",
             f"timeout_ms={int(self.timeout_sec * 1000)}",
         ]
         started = time.monotonic()
         run_id = f"appserver-{int(time.time() * 1000)}"
+        events: list[CliEvent] = []
+        timed_out = False
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=False,
+            bufsize=1,
+        )
+        deadline = started + self.timeout_sec
         try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout_sec + 30,
-                shell=False,
-            )
-            stdout, stderr, code = completed.stdout, completed.stderr, completed.returncode
-            timed_out = False
-        except subprocess.TimeoutExpired as exc:
-            stdout, stderr, code = exc.stdout or "", exc.stderr or "", None
+            assert process.stdout is not None
+            for line in process.stdout:
+                if time.monotonic() > deadline:
+                    timed_out = True
+                    process.kill()
+                    break
+                parsed = parse_jsonl(line)
+                for event in parsed:
+                    events.append(event)
+                    if self.on_event:
+                        try:
+                            self.on_event(event)
+                        except Exception:
+                            pass
+                    if event.type == "tool_call" and self.on_tool_call and process.stdin:
+                        try:
+                            result = self.on_tool_call(
+                                str(event.raw.get("tool") or ""),
+                                event.raw.get("arguments") or {},
+                                event.raw,
+                            )
+                            response = {
+                                "type": "tool_response",
+                                "request_id": event.raw.get("request_id"),
+                                "success": True,
+                                "result": result,
+                            }
+                        except Exception as exc:
+                            response = {
+                                "type": "tool_response",
+                                "request_id": event.raw.get("request_id"),
+                                "success": False,
+                                "result": {"error": str(exc)},
+                            }
+                        process.stdin.write(json.dumps(response, ensure_ascii=False) + "\n")
+                        process.stdin.flush()
+            code = process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
             timed_out = True
-        events = parse_jsonl(stdout)
+            process.kill()
+            code = process.wait(timeout=10)
+        stderr = ""
+        if not events:
+            stderr = "app-server produced no JSON events"
         thread_id = thread
         text = ""
         usage = {}

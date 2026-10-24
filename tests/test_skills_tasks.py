@@ -22,6 +22,7 @@ class SkillTests(unittest.TestCase):
                 "optimize-operator",
                 "optimize-ascend-operator",
                 "generate-operator-tests",
+                "start-operator-optimization",
             },
         )
         block, meta = registry.prompt_block(

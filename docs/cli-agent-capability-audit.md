@@ -174,6 +174,29 @@ codex resume <thread_id>
 The same Web “Codex 运行” button starts this app-server loop. Codex still cannot
 submit to CANNJudge directly; only the host snapshots and scheduler submit.
 
+## 6.2 Tool-driven continuous session
+
+The current `codex-loop` path is a tool-driven conversation, not a fixed round
+loop:
+
+- the provided `start-operator-optimization` skill is installed under
+  `skills/start-operator-optimization/` and injected into the first turn;
+- the app-server thread receives dynamic tools:
+  `task_status`, `read_problem`, `read_history`, `read_attempt_source`,
+  `read_workspace`, `save_candidate`, `submit_candidate`, `query_submission`;
+- when Codex emits `item/tool/call`, the Node bridge sends the call to Python,
+  Python executes the host tool, and the JSON result is returned into the same
+  Codex turn;
+- `submit_candidate` creates the immutable snapshot, queues the existing
+  scheduler submission, waits for the real remote result, and returns it to
+  Codex;
+- there is no configured round count. The session continues until the user
+  pauses/stops the task or a real transport error occurs.
+
+The Web “Codex 运行” action therefore starts a persistent task session, not a
+one-shot request. Pause/stop terminates the platform-started process tree;
+submission frequency and unknown/reconciliation protections remain host-side.
+
 The Web task detail exposes “Codex 运行” for this local loop. Pause/stop now
 terminates the platform-started Codex process tree by PID; duplicate starts are
 guarded. Codex mode bypasses cumulative attempt/model/token/runtime/stall stops,

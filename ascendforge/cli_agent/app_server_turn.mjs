@@ -7,10 +7,20 @@ const args = Object.fromEntries(process.argv.slice(2).map((item) => {
 }));
 const port = args.port;
 const cwd = args.cwd;
-const prompt = args.prompt || "";
+const promptFile = args.prompt_file || "";
+const fs = await import("node:fs");
+const prompt = promptFile
+  ? fs.readFileSync(promptFile, "utf8")
+  : (args.prompt || "");
 const threadId = args.thread || "";
 const model = args.model || "";
+const toolsFile = args.tools_file || "";
+const readline = await import("node:readline");
 const timeoutMs = Number(args.timeout_ms || 1800000);
+const dynamicTools = toolsFile && fs.existsSync(toolsFile)
+  ? JSON.parse(fs.readFileSync(toolsFile, "utf8"))
+  : [];
+const pendingTools = new Map();
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
@@ -48,7 +58,10 @@ function startTurn() {
 }
 
 ws.onopen = () => {
-  send(1, "initialize", { clientInfo: { name: "AscendForge", version: "0.1" } });
+  send(1, "initialize", {
+    clientInfo: { name: "AscendForge", version: "0.1" },
+    capabilities: { experimentalApi: true },
+  });
 };
 
 ws.onmessage = (event) => {
@@ -56,9 +69,9 @@ ws.onmessage = (event) => {
   try { obj = JSON.parse(String(event.data)); } catch (_) { return; }
   if (obj.id === 1 && obj.result) {
     if (activeThread) {
-      send(2, "thread/resume", { threadId: activeThread, cwd });
+      send(2, "thread/resume", { threadId: activeThread, cwd, dynamicTools });
     } else {
-      send(2, "thread/start", { cwd });
+      send(2, "thread/start", { cwd, dynamicTools });
     }
     return;
   }
@@ -81,6 +94,19 @@ ws.onmessage = (event) => {
     if (item.type === "agentMessage" && item.text) finalText = String(item.text);
     return;
   }
+  if (obj.method === "item/tool/call") {
+    const params = obj.params || {};
+    pendingTools.set(String(obj.id), obj.id);
+    emit({
+      type: "tool_call",
+      request_id: obj.id,
+      call_id: params.callId,
+      thread_id: params.threadId,
+      tool: params.tool,
+      arguments: params.arguments,
+    });
+    return;
+  }
   if (obj.method === "thread/tokenUsage/updated") {
     usage = ((obj.params || {}).tokenUsage || {}).total || usage;
     return;
@@ -97,6 +123,23 @@ ws.onmessage = (event) => {
     emit({ type: "bridge.error", error: obj.error || obj.params || obj });
   }
 };
+
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch (_) { return; }
+  if (msg.type !== "tool_response" || !pendingTools.has(String(msg.request_id))) return;
+  const requestId = pendingTools.get(String(msg.request_id));
+  pendingTools.delete(String(msg.request_id));
+  const success = msg.success !== false;
+  const text = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result ?? null);
+  ws.send(JSON.stringify({
+    id: requestId,
+    result: {
+      success,
+      contentItems: [{ type: "inputText", text }],
+    },
+  }));
+});
 
 ws.onerror = () => fail("websocket connection failed");
 ws.onclose = () => {

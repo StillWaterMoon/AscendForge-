@@ -76,6 +76,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "codex_runner_log": None,
     "codex_runner_started_at": None,
     "codex_session_ref": None,
+    "codex_runner_token": None,
     "manual_only": False,
     "strategy_prompt": "",
 }
@@ -501,6 +502,7 @@ class TaskService:
         except Exception as exc:
             log.warning("failed to terminate Codex runner %s: %s", pid, exc)
         config.pop("codex_runner_pid", None)
+        config.pop("codex_session_ref", None)
         config["codex_runner_active"] = False
         config["codex_runner_status"] = "terminated"
         self.db.execute(
