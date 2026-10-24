@@ -449,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     codex_loop = sub.add_parser("codex-loop", help="本地 Codex 编辑→快照→评测循环")
     codex_loop.add_argument("--task", required=True)
     codex_loop.add_argument("--prompt", help="额外优化指令")
-    codex_loop.add_argument("--timeout", type=float, default=900, help="单轮 Codex 超时")
+    codex_loop.add_argument("--timeout", type=float, default=3600, help="单轮 Codex 超时")
     codex_loop.add_argument("--submission-timeout", type=float, default=1200)
     codex_loop.add_argument("--keep-running", action="store_true")
     codex_loop.add_argument("--lock-token", help=argparse.SUPPRESS)

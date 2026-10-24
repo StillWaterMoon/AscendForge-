@@ -508,8 +508,9 @@ def run_codex_agent(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(current_config), now(), task_id),
             )
-            if not keep_running and current_task["status"] == "running":
-                tasks.pause(task_id, reason="codex_session_finished")
+            # Do not auto-pause a tool-driven session: only the user decides
+            # when the continuous optimization stops.  The next start resumes
+            # the same thread/session.
         except Exception:
             pass
 
