@@ -67,6 +67,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "agent_max_steps": 10,
     "max_local_seconds": 30,
     "prompt_version": "v1",
+    "execution_mode": "api",
     "manual_only": False,
     "strategy_prompt": "",
 }
@@ -116,6 +117,10 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
     integer("poll_interval_sec", 3, 600)
     integer("agent_max_steps", 1, 30)
     integer("max_local_seconds", 5, 600)
+    mode = str(config.get("execution_mode") or "api").lower()
+    if mode not in ("api", "cli", "codex"):
+        raise TaskError("BAD_CONFIG", "execution_mode 必须是 api、cli 或 codex")
+    config["execution_mode"] = mode
 
     if config["max_cost"] is not None:
         try:

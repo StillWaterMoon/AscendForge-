@@ -139,6 +139,20 @@ last_message = float32 tiled vector experiment proposal
 
 It modified nothing and correctly remained read-only. This proves local Codex workspace execution and event parsing, not platform tool takeover.
 
+A mock-tested loop (`codex-loop`) now also:
+
+- prepares a writable workspace from the current parent snapshot;
+- runs Codex, collects changed source files;
+- runs host preflight, saves an immutable snapshot, and creates an attempt;
+- requests the existing scheduler submission and waits for its real result;
+- resumes the Codex session with the result for the next round;
+- records `cli_runs` and leaves official sending to the worker.
+
+The Web task detail exposes “Codex 运行” for this local loop. It is not yet a
+fully migrated dual-backend supervisor: run records are minimal, pause does not
+yet terminate an in-flight Codex process tree, and old API mode remains the
+default for new tasks.
+
 ## 7. 已完成的最小代码
 
 新增：

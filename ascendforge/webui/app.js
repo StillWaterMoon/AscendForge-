@@ -651,6 +651,7 @@ async function renderTask(taskId) {
         ${['completed', 'stopped'].includes(task.status) && task.model_configured ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
+        ${['pending', 'paused', 'running'].includes(task.status) ? '<button class="btn" data-codex-run="1" type="button" title="本地 Codex CLI 编辑工作区，宿主保存快照并提交评测">Codex 运行</button>' : ''}
         <button class="btn btn-ghost" data-budget="1" type="button">调整提交上限</button>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
       </div>
@@ -728,6 +729,7 @@ async function renderTask(taskId) {
   $$('[data-message]').forEach((button) => button.addEventListener('click', () => openMessageModal(task)));
   $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
   $$('[data-experiment-edit]').forEach((button) => button.addEventListener('click', () => openExperimentModal(task)));
+  $$('[data-codex-run]').forEach((button) => button.addEventListener('click', () => openCodexModal(task)));
   $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
@@ -798,6 +800,45 @@ async function openBudgetModal(task) {
     } catch (err) {
       errorBox.hidden = false;
       errorBox.textContent = err.message || '保存失败';
+      button.disabled = false;
+    }
+  });
+}
+
+async function openCodexModal(task) {
+  openModal('本地 Codex 运行', `
+    <form id="codex-form" class="stack">
+      <div class="alert info">Codex 会在本地工作区修改源码；宿主负责保存快照并走现有调度器提交。Codex 不能直接提交 CANNJudge，也不能访问凭据。默认结束后暂停任务。</div>
+      <div class="field"><label for="codex-rounds">轮数（1–5）</label><input id="codex-rounds" type="number" min="1" max="5" value="1"></div>
+      <div class="field"><label for="codex-prompt">额外优化指令（可选）</label><textarea id="codex-prompt" rows="4" placeholder="例如：只做 float32 的向量化；保持其他 dtype 和接口不变。"></textarea></div>
+      <div class="faint small">运行日志会写入服务器日志目录；不会把 Codex 的私有推理当作文本保存。</div>
+      <div class="alert error" id="codex-error" hidden></div>
+      <div class="form-actions">
+        <button class="btn" type="button" data-modal-close>取消</button>
+        <button class="btn btn-primary" type="submit">启动 Codex</button>
+      </div>
+    </form>`);
+  $('#codex-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorBox = $('#codex-error');
+    errorBox.hidden = true;
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const data = await api(`/api/tasks/${encodeURIComponent(task.id)}/codex-run`, {
+        method: 'POST',
+        body: {
+          rounds: Number($('#codex-rounds').value),
+          prompt: $('#codex-prompt').value,
+        },
+        requestId: uuid(),
+      });
+      closeModal();
+      toast(`Codex 已启动，PID ${data.pid}；日志 ${data.log}`, 'success');
+      renderTask(task.id).catch(() => {});
+    } catch (err) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message || '启动失败';
       button.disabled = false;
     }
   });

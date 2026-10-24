@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -238,6 +238,25 @@ CREATE TABLE IF NOT EXISTS evaluations (
 CREATE INDEX IF NOT EXISTS idx_evaluations_task ON evaluations(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluations_experiment ON evaluations(experiment_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluations_key ON evaluations(task_id, eval_key);
+
+CREATE TABLE IF NOT EXISTS cli_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    attempt_id TEXT,
+    backend TEXT NOT NULL,
+    session_ref TEXT,
+    run_id TEXT,
+    workspace TEXT,
+    exit_code INTEGER,
+    timed_out INTEGER NOT NULL DEFAULT 0,
+    usage_json TEXT,
+    last_message TEXT,
+    changed_files_json TEXT,
+    error TEXT,
+    started_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_cli_runs_task ON cli_runs(task_id, started_at);
 
 CREATE TABLE IF NOT EXISTS model_calls (
     id TEXT PRIMARY KEY,

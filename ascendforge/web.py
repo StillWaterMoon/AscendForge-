@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -238,6 +239,7 @@ class App:
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/budget$", "h_update_budget", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/experiment$", "h_update_experiment", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/codex-run$", "h_codex_run", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages_post", False, False),
@@ -1008,6 +1010,69 @@ class Handler(BaseHTTPRequestHandler):
             ),
         )
         return self.h_task_detail(task_id)
+
+    def h_codex_run(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        if task["status"] not in ("running", "paused", "pending"):
+            raise ApiError(400, "BAD_STATE", "Codex 只能在 pending/paused/running 任务上启动")
+        body = self._read_json()
+        try:
+            rounds = max(1, min(5, int(body.get("rounds") or 1)))
+        except (TypeError, ValueError):
+            raise ApiError(400, "BAD_ROUNDS", "rounds 必须是 1..5") from None
+        prompt = str(body.get("prompt") or "").strip()
+        if len(prompt) > 8000:
+            raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
+        config = dict(task.get("config") or {})
+        config["execution_mode"] = "codex"
+        self.app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        log_path = self.app.settings.logs_dir / f"codex-{task_id}-{int(now())}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            sys.executable,
+            "-m",
+            "ascendforge",
+            "codex-loop",
+            "--task",
+            task_id,
+            "--rounds",
+            str(rounds),
+        ]
+        if prompt:
+            command.extend(["--prompt", prompt])
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(self.app.settings.root)
+        env["ASCENDFORGE_DATA_DIR"] = str(self.app.settings.data_dir)
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        handle = open(log_path, "a", encoding="utf-8")
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.app.settings.root),
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                env=env,
+                creationflags=flags,
+            )
+        finally:
+            handle.close()
+        add_event(
+            self.app.db,
+            task_id,
+            None,
+            "codex_run_started",
+            {"pid": process.pid, "rounds": rounds, "log": str(log_path), "actor": (session or {}).get("username")},
+        )
+        return 200, {
+            "started": True,
+            "pid": process.pid,
+            "rounds": rounds,
+            "log": str(log_path),
+            "task": self.app.tasks.get(task_id),
+        }
 
     def h_task_messages(self, task_id: str, **_: Any):
         task = self.app.tasks.get(task_id)

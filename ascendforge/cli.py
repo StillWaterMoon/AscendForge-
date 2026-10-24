@@ -312,6 +312,23 @@ def cmd_codex_run(args) -> int:
     return 0 if result.exit_code == 0 and not result.timed_out else 2
 
 
+def cmd_codex_loop(args) -> int:
+    from .codex_loop import run_codex_loop
+
+    settings = _settings(args)
+    result = run_codex_loop(
+        settings,
+        args.task,
+        rounds=args.rounds,
+        prompt=args.prompt or "",
+        timeout_sec=args.timeout,
+        submission_timeout=args.submission_timeout,
+        keep_running=args.keep_running,
+    )
+    print(json_dumps(result, pretty=True))
+    return 0
+
+
 def cmd_status(args) -> int:
     settings = _settings(args)
     db = Database(settings.db_path)
@@ -428,6 +445,15 @@ def build_parser() -> argparse.ArgumentParser:
     codex_run.add_argument("--sandbox", choices=["read-only", "workspace-write"], default="read-only")
     codex_run.add_argument("--timeout", type=float, default=900)
     codex_run.set_defaults(func=cmd_codex_run)
+
+    codex_loop = sub.add_parser("codex-loop", help="本地 Codex 编辑→快照→评测循环")
+    codex_loop.add_argument("--task", required=True)
+    codex_loop.add_argument("--rounds", type=int, default=3)
+    codex_loop.add_argument("--prompt", help="额外优化指令")
+    codex_loop.add_argument("--timeout", type=float, default=900, help="单轮 Codex 超时")
+    codex_loop.add_argument("--submission-timeout", type=float, default=1200)
+    codex_loop.add_argument("--keep-running", action="store_true")
+    codex_loop.set_defaults(func=cmd_codex_loop)
 
     backup = sub.add_parser("backup", help="创建服务器备份")
     backup.add_argument("--include-key", action="store_true", help="包含主密钥（高风险）")
