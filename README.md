@@ -13,7 +13,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 101 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 105 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
@@ -143,7 +143,7 @@ ascendforge/
     capabilities.py      NPU/CANN/Docker 诚实检测
   backup.py, cli.py, db.py, states.py
 skills/                  四个 SKILL.md（通用优化 + Ascend 平台 + 测试生成 + 工作台规范）
-tests/                   101 个 unittest
+tests/                   105 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -162,6 +162,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 兼容层：`evaluations` 表、revision 的 config/edit_mode 字段已预留；真实 patch、参数评测和去重仍在下一阶段
 - 参数实验：`parameter-run` 是宿主侧确定性 runner；配置枚举、固定基线、参数化源码快照、结果复用、失败重试、复测和预算耗尽均有记录；`--simulate` 不产生远端提交，真实模式通过 scheduler 提交并等待结果
 - 通用闭环：阶段、责任边界、已验证场景和剩余缺口见 [通用优化闭环](docs/general-optimization-loop.md)；参数扫描是可选执行器，不是所有实验的固定形式
+- CLI Agent 迁移：能力核查与阻塞项见 [CLI Agent 能力核查](docs/cli-agent-capability-audit.md)；当前 Codex CLI 可用，DeepSeek CLI 未安装，尚未切换到 CLI 执行循环
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 运行预算：`max_tokens=0` / `max_model_calls=0` 表示不限；提交上限、每日上限、尝试轮数、运行时长等仍由宿主强制执行，无限 Token 不等于无限提交
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取

@@ -225,6 +225,13 @@ def cmd_user(args) -> int:
     return 1
 
 
+def cmd_cli_probe(args) -> int:
+    from .cli_agent.probe import probe_all
+
+    print(json_dumps(probe_all(), pretty=True))
+    return 0
+
+
 def cmd_status(args) -> int:
     settings = _settings(args)
     db = Database(settings.db_path)
@@ -329,6 +336,9 @@ def build_parser() -> argparse.ArgumentParser:
     parameter.add_argument("--keep-running", action="store_true", help="结束后不暂停任务")
     parameter.add_argument("--timeout", type=float, default=1800, help="每个配置等待远端结果的秒数")
     parameter.set_defaults(func=cmd_parameter_run)
+
+    cli_probe = sub.add_parser("cli-probe", help="探测 Codex / DeepSeek CLI 能力（不启动会话）")
+    cli_probe.set_defaults(func=cmd_cli_probe)
 
     backup = sub.add_parser("backup", help="创建服务器备份")
     backup.add_argument("--include-key", action="store_true", help="包含主密钥（高风险）")
