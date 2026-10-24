@@ -556,6 +556,7 @@ def run_codex_agent(
             + "2. submit_official(request_id?, hypothesis?)：保存当前 workspace 快照并排队官方提交，立即返回 submission_id；\n"
             + "3. read_official_evaluation(submission_id)：查询提交状态、编译错误、测试点、耗时和分数。\n"
             + "源码请直接用你自己的文件工具在 workspace 内读取和修改；不要等待用户逐步指挥。\n"
+            + "只修改可编辑文件：kernel.asc 和根目录 .asc/.h；不要修改 main.asc、CMakeLists.txt、run.sh、sample.py、reference.py。\n"
             + "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
             + "提交后必须轮询 read_official_evaluation，根据真实结果决定修复、继续、回退或更换方向。\n\n"
             + (prompt or "")
