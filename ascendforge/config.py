@@ -87,6 +87,11 @@ class Settings:
     executor_memory_mb: int = 512
     executor_cpus: float = 1.0
     executor_allow_network: bool = False
+    # Optional fixed-test NPU evaluation backend used by MCP tools.
+    # Disabled/empty means "not_configured", never a fabricated result.
+    server_eval_enabled: bool = False
+    server_eval_command: str = ""
+    server_eval_timeout: int = 900
     cannjudge_base_url: str = "https://cannjudge.cn"
     max_package_mb: int = 64
     admin_user: str = "admin"
@@ -177,6 +182,9 @@ class Settings:
             executor_memory_mb=max(128, _env_int("ASCENDFORGE_EXECUTOR_MEMORY_MB", 512)),
             executor_cpus=max(0.25, _env_float("ASCENDFORGE_EXECUTOR_CPUS", 1.0)),
             executor_allow_network=_env_bool("ASCENDFORGE_EXECUTOR_ALLOW_NETWORK", False),
+            server_eval_enabled=_env_bool("ASCENDFORGE_SERVER_EVAL_ENABLED", False),
+            server_eval_command=_env_str("ASCENDFORGE_SERVER_EVAL_COMMAND", ""),
+            server_eval_timeout=max(30, _env_int("ASCENDFORGE_SERVER_EVAL_TIMEOUT", 900)),
             cannjudge_base_url=_env_str("ASCENDFORGE_CANNJUDGE_BASE_URL", "https://cannjudge.cn").rstrip("/"),
             max_package_mb=max(1, _env_int("ASCENDFORGE_MAX_PACKAGE_MB", 64)),
             admin_user=_env_str("ASCENDFORGE_ADMIN_USER", "admin") or "admin",
