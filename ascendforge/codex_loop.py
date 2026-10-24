@@ -44,74 +44,57 @@ class CodexLoopError(RuntimeError):
     pass
 
 
+# Codex 只暴露三个平台工具：
+# 读题、提交官方、查询官方结果。
+# 源码读取/编辑使用 Codex 自己的 workspace 文件能力，不再提供额外文件工具。
 CLI_TOOL_SPECS = [
     {
         "type": "function",
-        "name": "task_status",
-        "description": "Read current task status, best/working attempts, pending submission and platform limits.",
-        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "type": "function",
         "name": "read_problem",
-        "description": "Read the imported problem contract and testcase count.",
-        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "type": "function",
-        "name": "read_history",
-        "description": "List recent attempts with status, hypothesis and normalized result.",
+        "description": "Read a CANNJudge problem by its public URL and return the complete Markdown statement.",
         "inputSchema": {
             "type": "object",
-            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 30}},
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "CANNJudge problem URL.",
+                }
+            },
+            "required": ["url"],
             "additionalProperties": False,
         },
     },
     {
         "type": "function",
-        "name": "read_attempt_source",
-        "description": "Read a complete source snapshot by attempt id (default: current parent).",
+        "name": "read_official_evaluation",
+        "description": "Read a CANNJudge submission by submission_id: state, compile errors, testcase results, timing and score.",
         "inputSchema": {
             "type": "object",
-            "properties": {"attempt_id": {"type": "string"}},
+            "properties": {
+                "submission_id": {"type": "string", "minLength": 1, "maxLength": 120}
+            },
+            "required": ["submission_id"],
             "additionalProperties": False,
         },
     },
     {
         "type": "function",
-        "name": "read_workspace",
-        "description": "List the workspace files and return the current editable source contents.",
-        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "type": "function",
-        "name": "save_candidate",
-        "description": "Validate the current workspace changes and save them as an immutable candidate snapshot without submitting.",
+        "name": "submit_official",
+        "description": "Snapshot the current workspace and submit it to CANNJudge through the host scheduler. Returns submission_id immediately; query it with read_official_evaluation.",
         "inputSchema": {
             "type": "object",
-            "properties": {"hypothesis": {"type": "string"}},
-            "required": ["hypothesis"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "submit_candidate",
-        "description": "Validate the current workspace changes, save an immutable snapshot, submit it to the host scheduler, wait for the real remote result, and return the result.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"hypothesis": {"type": "string"}},
-            "required": ["hypothesis"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "query_submission",
-        "description": "Read the latest submission state/result, or a specific submission_id.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"submission_id": {"type": "string"}},
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Optional idempotency key for safe retries.",
+                },
+                "hypothesis": {"type": "string", "maxLength": 4000},
+                "parent_attempt_id": {"type": "string"},
+            },
+            "required": [],
             "additionalProperties": False,
         },
     },
@@ -196,6 +179,30 @@ def _wait_submission(db: Database, scheduler: Scheduler, worker: Worker, submiss
             return row
         time.sleep(2)
     raise CodexLoopError(f"submission {submission_id} did not finish within {timeout_sec}s")
+
+
+def _submission_summary(
+    db: Database,
+    submission: dict,
+    *,
+    reused: bool,
+    attempt: dict | None = None,
+    snapshot: dict | None = None,
+) -> dict:
+    snapshot_row = db.query_one(
+        "SELECT sha256 FROM snapshots WHERE id=?", (submission["snapshot_id"],)
+    )
+    return {
+        "submission_id": submission["id"],
+        "attempt_id": submission.get("attempt_id") or (attempt or {}).get("id"),
+        "snapshot_id": submission.get("snapshot_id") or (snapshot or {}).get("id"),
+        "source_sha256": snapshot_row["sha256"] if snapshot_row else submission.get("request_hash"),
+        "state": submission["state"],
+        "remote_id": submission.get("remote_id"),
+        "reused": reused,
+        "submitted": True,
+        "note": "accepted/queued only; poll read_official_evaluation for the result",
+    }
 
 
 def run_codex_agent(
@@ -291,7 +298,118 @@ def run_codex_agent(
             raise ValueError("preflight failed: " + "; ".join(item["message"] for item in check["errors"][:5]))
         return files, audit
 
-    def tool_handler(tool: str, arguments: dict, raw: dict) -> dict:
+    def tool_handler(tool: str, arguments: dict, raw: dict) -> dict | str:
+        if tool == "read_problem":
+            # Codex 按 URL 读取公开题面；返回 Markdown 原文，不包 JSON。
+            url = str(arguments.get("url") or "").strip()
+            if not url:
+                raise ValueError("read_problem requires url")
+            adapter = CannjudgeAdapter(
+                base_url=settings.cannjudge_base_url,
+                timeout=30,
+            )
+            problem = adapter.resolve_problem(url)
+            statement = str(problem.get("desc") or problem.get("description") or "")
+            if not statement.strip():
+                raise ValueError("problem page has no statement")
+            return statement
+        if tool == "read_official_evaluation":
+            submission_id = str(arguments.get("submission_id") or "").strip()
+            if not submission_id:
+                raise ValueError("read_official_evaluation requires submission_id")
+            row = db.query_one(
+                "SELECT * FROM submissions WHERE id=? AND task_id=?",
+                (submission_id, task_id),
+            )
+            if not row:
+                raise ValueError("submission not found for this task")
+            attempt = get_attempt(db, row.get("attempt_id") or "") if row.get("attempt_id") else None
+            snapshot = (
+                db.query_one("SELECT sha256 FROM snapshots WHERE id=?", (row["snapshot_id"],))
+                if row.get("snapshot_id")
+                else None
+            )
+            normalized = json_loads(attempt.get("normalized_json"), {}) if attempt else {}
+            return {
+                "submission_id": row["id"],
+                "attempt_id": row.get("attempt_id"),
+                "snapshot_id": row.get("snapshot_id"),
+                "source_sha256": snapshot["sha256"] if snapshot else row.get("request_hash"),
+                "state": row["state"],
+                "remote_id": row.get("remote_id"),
+                "error_code": row.get("error_code"),
+                "error_message": row.get("error_message"),
+                "sent_at": row.get("sent_at"),
+                "poll_count": row.get("poll_count"),
+                "normalized": normalized,
+                "compile": normalized.get("compile"),
+                "correctness": normalized.get("correctness"),
+                "performance": normalized.get("performance"),
+                "score": normalized.get("score"),
+                "testcases": normalized.get("testcases") or normalized.get("result") or [],
+                "official": True,
+            }
+        if tool == "submit_official":
+            # 只保存快照并排队，立即返回 submission_id；不阻塞等待远端结果。
+            # Codex 之后调用 read_official_evaluation 查询。
+            if tasks.get(task_id)["status"] != "running":
+                raise ValueError("task must be running to submit_official")
+            request_id = str(arguments.get("request_id") or "").strip() or None
+            if request_id:
+                existing = db.query_one(
+                    "SELECT * FROM submissions WHERE task_id=? AND eval_key=? "
+                    "ORDER BY created_at ASC LIMIT 1",
+                    (task_id, request_id),
+                )
+                if existing:
+                    return _submission_summary(db, existing, reused=True)
+            files, audit = collect_effective()
+            hypothesis = str(arguments.get("hypothesis") or "Codex official candidate").strip()[:4000]
+            parent_id = str(arguments.get("parent_attempt_id") or state["parent_id"] or "") or None
+            attempt = create_attempt(
+                db,
+                task_id,
+                parent_attempt_id=parent_id,
+                experiment_id=experiment["id"],
+                provider="codex-cli",
+                model="codex",
+                prompt_version="codex-tool-v1",
+            )
+            update_attempt(
+                db,
+                attempt["id"],
+                hypothesis=hypothesis,
+                status="local_checking",
+                changed_files_json=json_dumps(
+                    {"files": sorted(files), "source": "codex-workspace", "audit": audit}
+                ),
+            )
+            snapshot = attach_snapshot(
+                db,
+                settings,
+                task_id=task_id,
+                attempt_id=attempt["id"],
+                files=files,
+            )
+            update_attempt(db, attempt["id"], snapshot_id=snapshot["id"], status="generated")
+            submission = scheduler.request_submission(task_id, attempt["id"])
+            if request_id:
+                db.execute(
+                    "UPDATE submissions SET eval_key=?, updated_at=? WHERE id=?",
+                    (request_id, now(), submission["id"]),
+                )
+                submission = db.query_one("SELECT * FROM submissions WHERE id=?", (submission["id"],))
+            state["parent_id"] = attempt["id"]
+            state["parent_files"] = dict(files)
+            state["saved_attempt_id"] = attempt["id"]
+            state["last_submission_id"] = submission["id"]
+            return _submission_summary(
+                db,
+                submission,
+                reused=False,
+                attempt=attempt,
+                snapshot=snapshot,
+            )
         if tool == "task_status":
             current = tasks.get(task_id)
             return {
@@ -302,15 +420,6 @@ def run_codex_agent(
                 "experiment": experiment.get("id"),
                 "parent_attempt_id": state["parent_id"],
                 "last_submission_id": state["last_submission_id"],
-            }
-        if tool == "read_problem":
-            problem = json_loads(task.get("problem_json"), {})
-            return {
-                "problem_id": problem.get("_id"),
-                "name": problem.get("name"),
-                "description": problem.get("desc") or problem.get("description"),
-                "testcase_count": len(problem.get("testcases") or []),
-                "code_template": problem.get("code_template"),
             }
         if tool == "read_history":
             limit = max(1, min(30, int(arguments.get("limit") or 10)))
@@ -441,9 +550,14 @@ def run_codex_agent(
             + "\n\n"
             + "使用上述 skill 开展持续算子优化。\n"
             + f"任务 ID：{task_id}\n工作目录：{workspace}\n"
-            + "通过已连接的工具读取任务、历史、源码，保存候选并提交真实评测。\n"
+            + f"题目链接：{task.get('problem_url') or ''}\n"
+            + "可用工具只有三个：\n"
+            + "1. read_problem(url)：读取完整题面；\n"
+            + "2. submit_official(request_id?, hypothesis?)：保存当前 workspace 快照并排队官方提交，立即返回 submission_id；\n"
+            + "3. read_official_evaluation(submission_id)：查询提交状态、编译错误、测试点、耗时和分数。\n"
+            + "源码请直接用你自己的文件工具在 workspace 内读取和修改；不要等待用户逐步指挥。\n"
             + "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
-            + "每次提交后必须根据真实结果决定修复、继续、回退或更换方向。\n\n"
+            + "提交后必须轮询 read_official_evaluation，根据真实结果决定修复、继续、回退或更换方向。\n\n"
             + (prompt or "")
         )
         turns = 0

@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ascendforge.codex_loop import run_codex_agent, run_codex_loop
+from ascendforge.codex_loop import CLI_TOOL_SPECS, run_codex_agent, run_codex_loop
 from ascendforge.experiments import read_snapshot
 
 from tests.helpers import make_env, seed_attempt, seed_task
@@ -129,6 +129,16 @@ class CodexLoopTests(unittest.TestCase):
         runs = env.db.query("SELECT * FROM cli_runs WHERE task_id=?", (task["id"],))
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["backend"], "codex")
+
+    def test_codex_exposes_exactly_three_platform_tools(self):
+        self.assertEqual(
+            [spec["name"] for spec in CLI_TOOL_SPECS],
+            ["read_problem", "read_official_evaluation", "submit_official"],
+        )
+        self.assertEqual(
+            CLI_TOOL_SPECS[0]["inputSchema"]["required"],
+            ["url"],
+        )
 
     def test_codex_agent_sends_placeholder_skill_and_does_not_autopause(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-agent-"))

@@ -179,17 +179,19 @@ submit to CANNJudge directly; only the host snapshots and scheduler submit.
 The current `codex-loop` path is a tool-driven conversation, not a fixed round
 loop:
 
-- the provided `start-operator-optimization` skill is installed under
-  `skills/start-operator-optimization/` and injected into the first turn;
-- the app-server thread receives dynamic tools:
-  `task_status`, `read_problem`, `read_history`, `read_attempt_source`,
-  `read_workspace`, `save_candidate`, `submit_candidate`, `query_submission`;
+- the first turn currently carries the placeholder skill text
+  `HELLO！ HELLO`; the full skill file remains in the repository for the next
+  step;
+- the app-server thread receives exactly three dynamic tools:
+  `read_problem`, `submit_official`, `read_official_evaluation`;
 - when Codex emits `item/tool/call`, the Node bridge sends the call to Python,
-  Python executes the host tool, and the JSON result is returned into the same
+  Python executes the host tool, and the result is returned into the same
   Codex turn;
-- `submit_candidate` creates the immutable snapshot, queues the existing
-  scheduler submission, waits for the real remote result, and returns it to
-  Codex;
+- `read_problem(url)` returns the complete public statement;
+- `submit_official` creates the immutable snapshot, queues the existing
+  scheduler submission and immediately returns `submission_id`;
+- `read_official_evaluation(submission_id)` returns state, compile errors,
+  testcase results, timing and score; Codex polls it after submitting;
 - there is no configured round count. The session continues until the user
   pauses/stops the task or a real transport error occurs.
 

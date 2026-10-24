@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **124 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **125 passed**
 
 状态含义：
 
@@ -30,6 +30,7 @@
 | 任务级 MCP 五工具、ID 查询、快照哈希、请求幂等 | PASS (unit/stdio) | `test_mcp`：工具 schema、stdio handshake、服务器/官方提交、request_id 复用；服务器固定测试命令实测返回日志 |
 | 新建任务上传项目模板 ZIP / 可选空项目 | PASS (unit/HTTP) | `test_project_template`：ZIP 解压、单根目录归一、空项目、路径穿越拒绝；`test_web`：上传接口 + 创建任务 |
 | 新建任务选择 LLM API / 本地 Codex | PASS (HTTP) | API 模式沿用平台模板和 Agent；Codex 模式可选 ZIP、创建后自动启动会话并发送占位 skill；见 `test_web` / `test_codex_loop` |
+| Codex 三工具 `read_problem` / `submit_official` / `read_official_evaluation` | PASS (LIVE dynamic tool) | app-server 实际会话中 Codex 自主调用 `read_problem(url)`，并连续调用 `submit_official` → `read_official_evaluation`；工具回调为测试桩，提交/查询宿主处理器由单元测试覆盖 |
 | 凭据不进模型上下文/实验文件，生成代码隔离 | PASS (unit) | 加密、掩码、环境清洗、档案扫描无 key |
 | 最终报告区分真实/mock/未验证 | PASS | 本文 + README + phase0 |
 
