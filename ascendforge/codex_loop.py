@@ -521,6 +521,7 @@ def run_codex_agent(
             }
         raise ValueError(f"unknown tool: {tool}")
 
+    turn_error: str | None = None
     try:
         adapter = AppServerAdapter(
             timeout_sec=timeout_sec,
@@ -598,8 +599,17 @@ def run_codex_agent(
                 started=now(),
             )
             turns += 1
-            if result.timed_out or result.exit_code not in (0, None):
-                add_event(db, task_id, None, "codex_turn_failed", {"error": result.error, "stderr": result.stderr[-1000:]})
+            # exit_code=0 不代表成功：Codex 的 403 余额不足等 API 错误
+            # 会以 result.error 返回，但进程退出码仍可能是 0。
+            if result.error or result.timed_out or result.exit_code not in (0, None):
+                turn_error = str(result.error or ("timeout" if result.timed_out else "codex exited non-zero"))
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "codex_turn_failed",
+                    {"error": turn_error, "stderr": result.stderr[-1000:]},
+                )
                 break
             history.append({"turn": turns, "thread": session_ref, "last": result.last_message[:1000]})
             if tasks.get(task_id)["status"] != "running":
@@ -615,7 +625,8 @@ def run_codex_agent(
         try:
             current_task = tasks.get(task_id)
             current_config = dict(current_task.get("config") or {})
-            if current_config.get("codex_runner_token") == token:
+            owns_token = current_config.get("codex_runner_token") == token
+            if owns_token:
                 current_config.pop("codex_runner_active", None)
                 current_config.pop("codex_runner_pid", None)
                 current_config.pop("codex_runner_token", None)
@@ -625,9 +636,22 @@ def run_codex_agent(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(current_config), now(), task_id),
             )
-            # Do not auto-pause a tool-driven session: only the user decides
-            # when the continuous optimization stops.  The next start resumes
-            # the same thread/session.
+            if turn_error and owns_token and current_task["status"] == "running":
+                # 余额不足/网络断开等真实错误不能让任务一直显示 running
+                # 却没有 runner。暂停后用户可以充值并手动恢复同一会话。
+                tasks.pause(task_id, reason=f"codex_error: {turn_error[:300]}")
+                db.execute(
+                    "UPDATE tasks SET last_error_code='CODEX_ERROR', last_error=?, updated_at=? WHERE id=?",
+                    (turn_error[:2000], now(), task_id),
+                )
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "codex_session_paused_on_error",
+                    {"error": turn_error[:1000]},
+                )
+            # 正常结束/用户暂停不自动暂停；真实错误才落为 paused。
         except Exception:
             pass
 

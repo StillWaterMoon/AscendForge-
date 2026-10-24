@@ -140,7 +140,7 @@ class CodexLoopTests(unittest.TestCase):
             ["url"],
         )
 
-    def test_codex_agent_sends_placeholder_skill_and_does_not_autopause(self):
+    def test_codex_agent_sends_placeholder_skill_and_pauses_on_api_error(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-agent-"))
         env = make_env(tmp)
         task = seed_task(env, status="running", title="Codex agent", config={"execution_mode": "codex"})
@@ -152,8 +152,10 @@ class CodexLoopTests(unittest.TestCase):
             result = run_codex_agent(env.settings, task["id"], timeout_sec=10)
         self.assertEqual(result["turns"], 1)
         self.assertIn("HELLO！ HELLO", adapter.prompts[0])
-        # 工具驱动会话结束时不能自动暂停，只有用户能暂停。
-        self.assertEqual(env.tasks.get(task["id"])["status"], "running")
+        # API/网络错误即使 exit_code=0 也必须结束并暂停，不能留下 running 空壳。
+        task_now = env.tasks.get(task["id"])
+        self.assertEqual(task_now["status"], "paused")
+        self.assertIn("stop test", task_now.get("last_error") or "")
 
     def test_codex_loop_resumes_session_for_second_round(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-loop2-"))
