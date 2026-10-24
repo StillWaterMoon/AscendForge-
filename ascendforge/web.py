@@ -1014,7 +1014,14 @@ class Handler(BaseHTTPRequestHandler):
     def h_codex_run(self, task_id: str, session: dict | None = None, **_):
         task = self.app.tasks.get(task_id)
         if task["status"] not in ("running", "paused", "pending"):
-            raise ApiError(400, "BAD_STATE", "Codex 只能在 pending/paused/running 任务上启动")
+            if task["status"] not in ("completed", "stopped"):
+                raise ApiError(400, "BAD_STATE", "Codex 只能在 pending/paused/running/completed/stopped 任务上启动")
+            self.app.db.execute(
+                "UPDATE tasks SET status='paused', stop_reason=NULL, stopped_at=NULL, paused_at=?, updated_at=? WHERE id=?",
+                (now(), now(), task_id),
+            )
+            add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
+            task = self.app.tasks.get(task_id)
         body = self._read_json()
         try:
             rounds = max(1, min(5, int(body.get("rounds") or 1)))
@@ -1043,6 +1050,7 @@ class Handler(BaseHTTPRequestHandler):
         if prompt:
             command.extend(["--prompt", prompt])
         config["codex_runner_log"] = str(log_path)
+        config["codex_runner_status"] = "starting"
         self.app.db.execute(
             "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
             (json_dumps(config), now(), task_id),
@@ -1064,6 +1072,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             config.pop("codex_runner_active", None)
             config.pop("codex_runner_log", None)
+            config.pop("codex_runner_status", None)
             self.app.db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(config), now(), task_id),
@@ -1071,6 +1080,13 @@ class Handler(BaseHTTPRequestHandler):
             raise
         finally:
             handle.close()
+        config["codex_runner_pid"] = process.pid
+        config["codex_runner_started_at"] = now()
+        config["codex_runner_status"] = "running"
+        self.app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
         add_event(
             self.app.db,
             task_id,

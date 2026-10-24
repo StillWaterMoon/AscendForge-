@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +35,7 @@ from .states import (
     TASK_TERMINAL,
     assert_task_transition,
 )
-from .util import canonical_json, json_loads, new_id, now
+from .util import canonical_json, json_dumps, json_loads, new_id, now
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +70,11 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "max_local_seconds": 30,
     "prompt_version": "v1",
     "execution_mode": "api",
+    "codex_runner_active": False,
+    "codex_runner_pid": None,
+    "codex_runner_status": None,
+    "codex_runner_log": None,
+    "codex_runner_started_at": None,
     "manual_only": False,
     "strategy_prompt": "",
 }
@@ -471,12 +478,43 @@ class TaskService:
         self._transition(task_id, TASK_RUNNING, reason="start")
         return self.get(task_id)
 
+    def _terminate_codex_runner(self, task_id: str, *, reason: str) -> None:
+        task = self.db.query_one("SELECT config_json FROM tasks WHERE id=?", (task_id,))
+        if not task:
+            return
+        config = json_loads(task.get("config_json"), {})
+        pid = config.get("codex_runner_pid")
+        if not pid:
+            return
+        try:
+            pid = int(pid)
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+            else:
+                os.killpg(pid, 15)
+        except Exception as exc:
+            log.warning("failed to terminate Codex runner %s: %s", pid, exc)
+        config.pop("codex_runner_pid", None)
+        config["codex_runner_active"] = False
+        config["codex_runner_status"] = "terminated"
+        self.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        add_event(self.db, task_id, None, "codex_runner_terminated", {"pid": pid, "reason": reason})
+
     def pause(self, task_id: str, reason: str = "user") -> dict:
         task = self.get(task_id)
         if task["status"] == TASK_PAUSED:
             return task
         if task["status"] != TASK_RUNNING:
             raise TaskError("BAD_STATE", f"只有 running 任务可以暂停，当前为 {task['status']}")
+        self._terminate_codex_runner(task_id, reason=f"pause:{reason}")
         self._transition(task_id, TASK_PAUSED, reason=reason)
         return self.get(task_id)
 
@@ -508,6 +546,7 @@ class TaskService:
         task = self.get(task_id)
         if task["status"] in TASK_TERMINAL:
             return task
+        self._terminate_codex_runner(task_id, reason=f"stop:{reason}")
         self._transition(task_id, TASK_STOPPED, reason=reason)
         # A queued submission has not been sent.  Stop it before it can leave;
         # submissions already accepted remotely are intentionally left alone.

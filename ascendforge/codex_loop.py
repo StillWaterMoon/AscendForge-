@@ -322,6 +322,8 @@ def run_codex_loop(
             current_task = tasks.get(task_id)
             current_config = dict(current_task.get("config") or {})
             current_config.pop("codex_runner_active", None)
+            current_config.pop("codex_runner_pid", None)
+            current_config["codex_runner_status"] = "finished"
             current_config["execution_mode"] = "codex"
             db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",

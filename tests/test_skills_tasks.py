@@ -8,6 +8,9 @@ from ascendforge.tasks import TaskError, normalize_config
 from tests.helpers import make_env, seed_attempt, seed_task
 
 
+from unittest.mock import patch
+
+
 class SkillTests(unittest.TestCase):
     def test_required_skills_load_explicitly(self):
         registry = SkillRegistry(Path(__file__).resolve().parents[1] / "skills")
@@ -71,6 +74,21 @@ class TaskStateTests(unittest.TestCase):
         self.assertEqual(row["error_code"], "TASK_STOPPED")
         attempt_row = self.env.db.query_one("SELECT status FROM attempts WHERE id=?", (attempt["id"],))
         self.assertEqual(attempt_row["status"], "failed")
+
+    def test_pause_terminates_codex_runner_and_clears_pid(self):
+        task = seed_task(
+            self.env,
+            status="running",
+            config={"execution_mode": "codex", "codex_runner_pid": 4242, "codex_runner_active": True},
+        )
+        with patch("ascendforge.tasks.subprocess.run") as run:
+            self.env.tasks.pause(task["id"], "test")
+            run.assert_called_once()
+        refreshed = self.env.tasks.get(task["id"])
+        self.assertEqual(refreshed["status"], "paused")
+        self.assertFalse(refreshed["config"]["codex_runner_active"])
+        self.assertNotIn("codex_runner_pid", refreshed["config"])
+        self.assertEqual(refreshed["config"]["codex_runner_status"], "terminated")
 
     def test_config_validation(self):
         with self.assertRaises(TaskError):

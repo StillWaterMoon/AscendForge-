@@ -651,7 +651,7 @@ async function renderTask(taskId) {
         ${['completed', 'stopped'].includes(task.status) && task.model_configured ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
-        ${['pending', 'paused', 'running'].includes(task.status) ? '<button class="btn" data-codex-run="1" type="button" title="本地 Codex CLI 编辑工作区，宿主保存快照并提交评测">Codex 运行</button>' : ''}
+        ${['pending', 'paused', 'running', 'completed', 'stopped'].includes(task.status) && !task.config?.codex_runner_active ? '<button class="btn" data-codex-run="1" type="button" title="本地 Codex CLI 编辑工作区，宿主保存快照并提交评测">Codex 运行</button>' : ''}
         <button class="btn btn-ghost" data-budget="1" type="button">调整提交上限</button>
         <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
       </div>
@@ -667,6 +667,13 @@ async function renderTask(taskId) {
       </div>
       <button class="btn btn-sm btn-ghost" data-message="1" type="button">给 Agent 留言</button>
     </div>
+
+    ${task.config?.codex_runner_active ? `<div class="experiment-strip codex-run-strip">
+      <span class="experiment-title">Codex 运行中</span>
+      <span>PID <b class="mono">${esc(task.config.codex_runner_pid || '—')}</b></span>
+      <span>${esc(task.config.codex_runner_status || 'running')}</span>
+      ${task.config.codex_runner_log ? `<span class="mono">${esc(String(task.config.codex_runner_log).split(/[\\/]/).pop())}</span>` : ''}
+    </div>` : ''}
 
     ${task.experiment?.id ? `<div class="experiment-strip">
       <span class="experiment-title">实验 #${esc(task.experiment.ordinal)} <span class="faint">${esc(task.experiment.status)}</span></span>
