@@ -274,6 +274,27 @@ class AgentRuntime:
                     "error": (result.get("error") or {}).get("code") if not result.get("ok") else None,
                 },
             )
+            if (
+                action.tool_name == "create_candidate"
+                and not result.get("ok")
+                and (result.get("error") or {}).get("code") == "NO_EFFECTIVE_CHANGE"
+            ):
+                rejected = int(
+                    self.db.scalar(
+                        "SELECT COUNT(*) FROM agent_messages WHERE attempt_id=? "
+                        "AND content LIKE '%NO_EFFECTIVE_CHANGE%'",
+                        (attempt["id"],),
+                    )
+                    or 0
+                )
+                if rejected >= 2:
+                    self._fail_attempt(
+                        task,
+                        attempt,
+                        "NO_EFFECTIVE_CHANGE_REPEATED",
+                        "candidate was comment/whitespace-only twice; stop retrying the same body and implement a real code change",
+                    )
+                    return "no_effective_change"
             if action.tool_name == "finish_task" and result.get("ok"):
                 return "finished"
             if action.tool_name == "request_submission" and result.get("ok"):

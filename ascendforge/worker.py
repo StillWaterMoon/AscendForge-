@@ -195,7 +195,7 @@ class Worker:
                     self.tasks.set_next_action(task_id, now() + 1)
                 elif result.startswith("provider_error"):
                     pass  # runtime set the backoff
-                elif result in ("needs_model", "skills_missing", "finished", "step_limit"):
+                elif result in ("needs_model", "skills_missing", "finished", "step_limit", "no_effective_change"):
                     pass
                 log.info("agent step task=%s result=%s", task_id, result)
             except Exception:

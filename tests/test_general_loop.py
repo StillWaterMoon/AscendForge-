@@ -5,7 +5,7 @@ from pathlib import Path
 from ascendforge.experiment_service import active_experiment
 from ascendforge.util import now
 
-from tests.helpers import make_env, seed_task
+from tests.helpers import make_env, seed_attempt, seed_task
 
 
 def force_poll(env):
@@ -18,6 +18,42 @@ def age_sends(env):
 
 
 class GeneralLoopTests(unittest.TestCase):
+    def test_repeated_comment_only_candidate_stops_attempt(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-no-effective-"))
+        script = [
+            {
+                "tool_name": "create_candidate",
+                "arguments": {
+                    "files": [{"path": "kernel.asc", "content": "int f() { return 1; }\n"}],
+                    "hypothesis": "same body with a comment",
+                },
+            },
+            {
+                "tool_name": "create_candidate",
+                "arguments": {
+                    "files": [{"path": "kernel.asc", "content": "int f() { return 1; }\n"}],
+                    "hypothesis": "same body again",
+                },
+            },
+        ]
+        env = make_env(tmp, script=script)
+        task = seed_task(env, status="running", title="Comment-only guard")
+        baseline = seed_attempt(env, task, source="int f() { return 1; }\n")
+        env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=? WHERE id=?",
+            (baseline["id"], baseline["id"], task["id"]),
+        )
+        from ascendforge.experiment_service import ensure_active
+
+        ensure_active(env.db, task["id"])
+        self.assertEqual(env.runtime.step(task["id"]), "continue")
+        self.assertEqual(env.runtime.step(task["id"]), "no_effective_change")
+        attempt = env.db.query_one(
+            "SELECT status,error_code FROM attempts WHERE task_id=? ORDER BY ordinal DESC LIMIT 1", (task["id"],)
+        )
+        self.assertEqual(attempt["status"], "failed")
+        self.assertEqual(attempt["error_code"], "NO_EFFECTIVE_CHANGE_REPEATED")
+
     def test_compile_failure_repair_then_baseline_building_on_another_task(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-general-loop-"))
         script = [
