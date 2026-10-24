@@ -30,7 +30,11 @@ Codex 从空目录开始，需要自己创建源码、构建脚本和入口文�
 - 拒绝绝对路径、`../` 路径和符号链接；
 - 文件必须是 UTF-8 文本；
 - 如果所有文件位于同一个顶层目录，会自动去掉该目录；
-- `__MACOSX/` 和 `.DS_Store` 会被忽略。
+- `__MACOSX/` 和 `.DS_Store` 会被忽略；
+- 上传模板中的 `main.asc`、`CMakeLists.txt`、`run.sh`、`sample.py`、
+  `reference.py`、`README.md`、`requirements.txt` 固定为只读，不进入
+  官方提交载荷；
+- 只有根目录的 `kernel.asc`、其他 `.asc` 和 `.h` 作为可编辑提交文件。
 
 解压失败会返回明确错误，不会创建半成品任务。
 

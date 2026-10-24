@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 from ascendforge.codex_loop import _template_files
+from ascendforge.platform.cannjudge import CannjudgeAdapter
 from ascendforge.tasks import TaskError
 from tests.helpers import make_env
 
@@ -55,6 +56,30 @@ class ProjectTemplateTests(unittest.TestCase):
             {"kernel.asc": "// uploaded kernel\n", "src/helper.h": "// helper\n"},
         )
         self.assertTrue((self.env.settings.data_dir / task["config"]["project_template_archive"]).is_file())
+
+    def test_uploaded_readonly_files_are_not_submitted(self):
+        archive = make_zip(
+            self.uploads / "upload_payload.zip",
+            {
+                "kernel.asc": "// kernel\n",
+                "main.asc": "// main\n",
+                "CMakeLists.txt": "project(x)\n",
+            },
+        )
+        task = self.env.tasks.create(
+            title="Payload task",
+            problem_url=PROBLEM_URL,
+            config={"execution_mode": "codex"},
+            project_archive=archive,
+        )
+        files = {item["path"]: item["content"] for item in task["template"]["files"]}
+        adapter = CannjudgeAdapter(user_id="test-user")
+        payload = adapter.build_submission_payload(
+            {"_id": task["problem_id"], "code_template": "npu_kernel_dev"},
+            task["template"],
+            files,
+        )
+        self.assertEqual([item["path"] for item in payload["files"]], ["kernel.asc"])
 
     def test_no_upload_starts_from_empty_project(self):
         task = self.env.tasks.create(

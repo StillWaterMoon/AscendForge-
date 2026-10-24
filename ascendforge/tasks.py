@@ -126,8 +126,30 @@ def _uploaded_template(archive: Path, task_dir: Path) -> tuple[dict, str]:
     if len(first_parts) == 1 and all("/" in rel for rel in rels):
         prefix = next(iter(first_parts)) + "/"
         raw_files = {rel[len(prefix):]: content for rel, content in raw_files.items()}
+    # CANNJudge 的 npu_kernel_dev 只允许提交 kernel.asc 和根目录源码辅助文件。
+    # 上传工程里的 main.asc / CMakeLists.txt / run.sh 等必须保持只读，
+    # 否则提交时会被平台以 FORBIDDEN_FILE（例如 main.asc）拒绝。
+    readonly_names = {
+        "main.asc",
+        "cmakelists.txt",
+        "run.sh",
+        "sample.py",
+        "reference.py",
+        "readme.md",
+        "requirements.txt",
+    }
+
+    def is_editable(rel: str) -> bool:
+        lower = rel.lower()
+        if lower in readonly_names:
+            return False
+        if "/" in rel:
+            return False
+        suffix = Path(rel).suffix.lower()
+        return suffix in (".asc", ".h")
+
     files = [
-        {"path": rel, "content": content, "editable": True}
+        {"path": rel, "content": content, "editable": is_editable(rel)}
         for rel, content in sorted(raw_files.items())
         if rel
     ]
