@@ -116,7 +116,30 @@ CLI 模式不能只改 UI；必须同时绕过这些后端判断，并保留单�
    - 旧 API 模式隔离保留，用于回滚
    - 同一任务不能同时运行两个执行循环
 
-## 6. 已完成的最小代码
+## 6. Local Codex adapter smoke
+
+`ascendforge codex-run --task <task_id>` now:
+
+1. reads the task's performance-best (or correctness/latest) snapshot;
+2. prepares a workspace with `TASK.json`, `AGENTS.md`, source files and a short recent-attempt list;
+3. runs `codex exec --json` with `read-only` sandbox by default;
+4. parses `thread_id`, `agent_message`, `turn.completed` usage;
+5. reports changed files, but **does not save a candidate and does not submit**.
+
+Actual local smoke against `task_1a16bdf5f935daf82`:
+
+```text
+exit_code = 0
+session_ref = present
+change_count = 0
+usage.input_tokens = 69289
+usage.output_tokens = 715
+last_message = float32 tiled vector experiment proposal
+```
+
+It modified nothing and correctly remained read-only. This proves local Codex workspace execution and event parsing, not platform tool takeover.
+
+## 7. 已完成的最小代码
 
 新增：
 
@@ -146,12 +169,12 @@ python -m ascendforge cli-probe
 - 读取或输出 auth token
 - 提交任何任务
 
-## 7. 下一步顺序
+## 8. 下一步顺序
 
-1. 用户确认/安装 DeepSeek CLI，或明确先只做 Codex 后端。
-2. 实现 Codex Adapter + Supervisor 的 mock 生命周期（不产生真实提交）。
+1. Codex Adapter 已具备本地 workspace 启动、事件解析和只读 smoke；下一步持久化 `cli_runs` / `session_ref`。
+2. 增加 host 侧“收集变更 → 保存不可变快照 → 排队评测”的闭环，而不是让 Codex 直接提交。
 3. 建立平台工具桥，先用 mock 工具验证读任务、保存候选、查结果。
-4. 用 Codex 做一次受控的真实工具调用验证。
+4. 用 Codex 做一次受控的写入候选验证（read-only 以外的 sandbox）。
 5. 实现 CLI 模式的预算绕过，保留单次执行保护。
 6. 接入 Web 后端选择与运行记录。
-7. 再实现 DeepSeek Adapter，验证安全切换。
+7. DeepSeek Harness 暂不实现，等确认可编程入口。
