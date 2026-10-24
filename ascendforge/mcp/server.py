@@ -86,9 +86,11 @@ class MCPServer:
             try:
                 validate_arguments(name, arguments)
                 result = self.functions.call(name, arguments)
+                # read_problem 只返回题面 Markdown 原文，不再包一层 JSON。
+                text = result if name == "read_problem" and isinstance(result, str) else _json_text(result)
                 return self._result(
                     request_id,
-                    {"content": [{"type": "text", "text": _json_text(result)}], "isError": False},
+                    {"content": [{"type": "text", "text": text}], "isError": False},
                 )
             except (ToolArgumentError, MCPToolError, ValueError) as exc:
                 return self._result(
@@ -142,6 +144,14 @@ def _read_message(stream) -> dict | None:
 
 def serve_stdio(functions: MCPToolFunctions | None) -> int:
     # 一行一条 JSON-RPC；stdout 只写协议响应，任何 print 都不能出现在这里。
+    # Windows 重定向 stdout 时默认可能是 cp936，必须显式改成 UTF-8，
+    # 否则中文题面会被写成乱码，客户端读到的是 U+FFFD。
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     server = MCPServer(functions)
     for raw in sys.stdin:
         text = raw.strip()

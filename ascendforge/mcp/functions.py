@@ -163,11 +163,10 @@ class MCPToolFunctions:
         )
         return adapter.resolve_problem(url)
 
-    def read_problem(self, arguments: dict) -> dict:
-        # 以调用方给出的题目 URL 为准，返回该题的完整题面；不是拿当前
-        # 任务缓存里的题面凑数。
+    def read_problem(self, arguments: dict) -> str:
+        # 输入只接受题目 URL；返回值也只要完整题面。
+        # CANNJudge 页面是 SPA，正文从公开 API 的 desc 字段读取。
         url = str(arguments["url"]).strip()
-        include_statement = bool(arguments.get("include_statement", True))
         try:
             problem = self.problem_reader(url)
         except Exception as exc:
@@ -175,58 +174,9 @@ class MCPToolFunctions:
         if not isinstance(problem, dict) or not problem:
             raise MCPToolError("题目页面没有返回有效题目数据")
         statement = str(problem.get("desc") or problem.get("description") or "")
-        if include_statement and not statement.strip():
+        if not statement.strip():
             raise MCPToolError("题目页面没有可解析的题面内容")
-        task_problem_id = str(self._problem.get("_id") or self._task.get("problem_id") or "")
-        resolved_id = str(problem.get("_id") or problem.get("id") or "")
-        same_as_task = bool(resolved_id and task_problem_id and resolved_id == task_problem_id)
-        editable = []
-        readonly = []
-        if same_as_task:
-            for path, item in sorted(self._template_files.items()):
-                entry = {
-                    "path": path,
-                    "editable": bool(item.get("editable")),
-                    "bytes": len(str(item.get("content") or "").encode("utf-8")),
-                }
-                (editable if entry["editable"] else readonly).append(entry)
-        latest = self._latest_snapshot_attempt()
-        testcases = problem.get("testcases") or []
-        result = {
-            "source_url": url,
-            "task_id": self.task_id,
-            "task_problem_url": self._task.get("problem_url"),
-            "same_as_task": same_as_task,
-            "title": problem.get("title"),
-            "problem_id": resolved_id or None,
-            "problem_name": problem.get("name") or problem.get("canonical_name"),
-            "problem_url": problem.get("url") or url,
-            "code_template": problem.get("code_template"),
-            "dtypes": problem.get("dtypes") or problem.get("dtype"),
-            "interface": problem.get("interface") or problem.get("function"),
-            "precision": problem.get("precision") or problem.get("tolerance"),
-            "constraints": problem.get("constraints"),
-            "testcase_count": len(testcases),
-            "testcases": testcases,
-            "statement_format": "markdown",
-            "statement_length": len(statement),
-            "file_directory": str(self.workspace) if same_as_task else None,
-            "editable_scope": editable,
-            "readonly_files": readonly,
-            "template_file_count": len(self._template_files) if same_as_task else 0,
-            "latest_candidate": latest["id"] if latest else None,
-            "latest_candidate_snapshot": latest.get("snapshot_id") if latest else None,
-            "statement_included": include_statement,
-        }
-        if not same_as_task:
-            # 读题工具可以查看其他公开题目，但不能把别的题的文件范围
-            # 冒充成当前任务的可编辑范围。
-            result["task_scope_note"] = (
-                "URL 指向的题目与当前任务不是同一题；file_directory/editable_scope 未返回。"
-            )
-        if include_statement:
-            result["statement"] = statement
-        return result
+        return statement
 
     def read_problem_file(self, arguments: dict) -> dict:
         path = str(arguments["path"])

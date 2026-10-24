@@ -67,52 +67,29 @@ env = { PYTHONPATH = "D:\\AscendForge", ASCENDFORGE_DATA_DIR = "D:\\AscendForge\
 
 ```json
 {
-  "url": "https://cannjudge.cn/public/vector/addn",
-  "include_statement": true
+  "url": "https://cannjudge.cn/public/vector/addn"
 }
 ```
 
-| 参数 | 类型 | 必填 | 默认 | 说明 |
-|---|---|---:|---|---|
-| `url` | string | 是 | — | CANNJudge 题目页面 URL |
-| `include_statement` | boolean | 否 | `true` | 是否返回完整题面 |
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `url` | string | 是 | CANNJudge 题目页面 URL |
 
 CANNJudge 页面是 SPA，正文由公开 API 返回。函数按 URL 定位题目并读取
-完整 `desc`，不截断；返回 `statement_format=markdown` 和
-`statement_length`。URL 不是当前任务题目时仍可读题，但不会把该题的
-文件范围冒充成当前任务的可编辑范围。
+完整 `desc`，不截断。
 
-返回：
+**返回：只返回完整题面 Markdown 字符串，不再返回题目元数据、测试点
+列表、文件范围或 JSON 包装。**
 
-```json
-{
-  "source_url": "https://cannjudge.cn/public/vector/addn",
-  "task_id": "task_...",
-  "task_problem_url": "...",
-  "same_as_task": true,
-  "title": "AddN",
-  "problem_id": "6aa76a...",
-  "problem_name": "addn",
-  "problem_url": "...",
-  "code_template": "npu_kernel_dev",
-  "statement": "完整题面 Markdown，全部内容",
-  "statement_format": "markdown",
-  "statement_length": 2653,
-  "dtypes": null,
-  "interface": null,
-  "precision": null,
-  "constraints": null,
-  "testcase_count": 15,
-  "testcases": [{"testcase_id": {"_id": "...", "ID": 13166, "type": "default"}}],
-  "file_directory": "...",
-  "editable_scope": [{"path": "kernel.asc", "editable": true, "bytes": 1286}],
-  "readonly_files": [{"path": "main.asc", "editable": false, "bytes": 5812}],
-  "latest_candidate": "att_...",
-  "latest_candidate_snapshot": "snap_..."
-}
+MCP 的 `content[0].text` 就是题面原文，例如：
+
+```text
+# AddN算子
+
+## 一、赛题背景
+
+AddN 是多路输入逐元素累加算子...
 ```
-
-`include_statement=false` 只返回结构，不返回完整 `statement`。
 
 ### 2. `read_problem_file`
 

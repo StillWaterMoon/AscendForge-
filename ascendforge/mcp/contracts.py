@@ -25,8 +25,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "name": "read_problem",
         "description": (
             "Fetch a CANNJudge problem by its public URL, e.g. "
-            "https://cannjudge.cn/public/vector/addn, and return the complete statement, "
-            "interface/precision constraints, testcase metadata and task file scope."
+            "https://cannjudge.cn/public/vector/addn, and return only the complete "
+            "Markdown statement."
         ),
         "inputSchema": {
             "type": "object",
@@ -36,11 +36,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
                     "minLength": 1,
                     "maxLength": 500,
                     "description": "CANNJudge problem URL.",
-                },
-                "include_statement": {
-                    "type": "boolean",
-                    "description": "Include the complete statement (default true).",
-                },
+                }
             },
             "required": ["url"],
             "additionalProperties": False,

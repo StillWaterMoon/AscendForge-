@@ -62,12 +62,24 @@ class MCPToolTests(unittest.TestCase):
         problem = self.functions.call(
             "read_problem", {"url": "https://cannjudge.cn/public/vector/add"}
         )
-        self.assertEqual(problem["task_id"], self.task["id"])
-        self.assertIn("editable_scope", problem)
-        self.assertIn("statement", problem)
-        self.assertEqual(problem["statement_format"], "markdown")
-        self.assertGreater(problem["statement_length"], 1000)
-        self.assertEqual(problem["testcase_count"], 1)
+        self.assertIsInstance(problem, str)
+        self.assertTrue(problem.startswith("# Add"))
+        self.assertGreater(len(problem), 1000)
+        self.assertIn("完整题面内容", problem)
+        # MCP 层不应再给题面套 JSON 引号或对象。
+        response = MCPServer(self.functions).handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "read_problem",
+                    "arguments": {"url": "https://cannjudge.cn/public/vector/add"},
+                },
+            }
+        )
+        self.assertFalse(response["result"]["isError"])
+        self.assertTrue(response["result"]["content"][0]["text"].startswith("# Add"))
         file = self.functions.call("read_problem_file", {"path": "kernel.asc"})
         self.assertEqual(file["source"], "workspace")
         self.assertEqual(file["content"], "// current draft\n")
