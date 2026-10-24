@@ -1,13 +1,15 @@
-"""MCP tool contracts for the AscendForge task session.
+"""MCP 工具契约：定义 Codex 可以调用的六个只读/提交函数。
 
-The six operations deliberately separate reads from submissions:
+设计原则：
+- 读取和提交彻底分开，避免把“已接收”误当成“已通过”；
+- 提交只返回 ID，结果必须用同一个 ID 再查询；
+- 不提供代码编辑工具，源码由 Codex 自己维护；
+- 参数在这里集中校验，任何工具实现都不能绕过。
 
+六个工具：
   read_problem / read_problem_file
   read_server_evaluation / read_official_evaluation
   submit_server_test / submit_official
-
-A submission only acknowledges receipt.  Results are always read by the id
-returned from the submit call.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ from typing import Any
 
 MAX_FILE_BYTES = 512 * 1024
 
+# 这组 schema 同时用于 MCP tools/list 和本地参数校验。
+# 描述保持英文，方便 Codex 直接理解；注释和文档使用中文。
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "read_problem",
@@ -148,6 +152,11 @@ class ToolArgumentError(ValueError):
 
 
 def validate_arguments(name: str, arguments: dict | None) -> dict:
+    """校验参数后返回一份浅拷贝。
+
+    这里故意不引入 jsonschema 依赖：工具参数都很小，手写校验更容易
+    保证错误信息可读，也避免模型传入嵌套结构绕过限制。
+    """
     spec = TOOLS_BY_NAME.get(name)
     if spec is None:
         raise ToolArgumentError(f"unknown tool: {name}")

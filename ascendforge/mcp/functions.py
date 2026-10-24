@@ -1,4 +1,10 @@
-"""The six function-call implementations behind the MCP server."""
+"""MCP server 背后的六个 tool function 实现。
+
+工具只返回数据或提交 ID，不负责猜测结果：
+- 服务器测试和官方 OJ 是两条完全不同的链路；
+- 官方提交只调用宿主 Scheduler，不直接访问 CANNJudge；
+- 读文件只允许题目模板和当前草稿目录，防止路径穿越。
+"""
 
 from __future__ import annotations
 
@@ -23,6 +29,7 @@ from ..util import json_dumps, json_loads, new_id, now, safe_relpath
 from .contracts import TOOL_NAMES, ToolArgumentError, validate_arguments
 from .server_eval import ServerEvaluationError, ServerEvaluationService
 
+# 只收集源码/构建相关文本文件；build 目录和元数据文件不进入快照。
 SOURCE_SUFFIXES = {".asc", ".h", ".hpp", ".cpp", ".cc", ".py", ".sh", ".txt", ".json", ".cmake"}
 META_NAMES = {"TASK.json", "AGENTS.md", "codex-tools.json", "codex-prompt.txt"}
 MAX_SOURCE_FILES = 64
@@ -34,10 +41,10 @@ class MCPToolError(RuntimeError):
 
 
 class MCPToolFunctions:
-    """Task-scoped tool implementation.
+    """绑定单个任务的 tool function 集合。
 
-    The server is started with a task id and the CLI's draft directory.  Tools
-    never accept an arbitrary filesystem path and never return credentials.
+    MCP server 启动时确定 task_id 和 workspace，因此模型不能在调用参数里
+    换任务或读取其他目录。所有提交都使用该任务现有快照/调度器。
     """
 
     def __init__(
@@ -81,6 +88,7 @@ class MCPToolFunctions:
         )
 
     def _workspace_source_files(self) -> dict[str, str]:
+        # 收集草稿中的文本源码；跳过 Codex 的元数据和隐藏/构建产物。
         if not self.workspace.is_dir():
             return {}
         files: dict[str, str] = {}
@@ -102,6 +110,8 @@ class MCPToolFunctions:
         return files
 
     def _current_source_files(self) -> dict[str, str]:
+        # 优先当前草稿；草稿不存在时退回最近候选快照，最后退回题目模板。
+        # 这样即使 Codex 还没写文件，读题和首次提交也不会凭空失败。
         files = self._workspace_source_files()
         if files:
             return files
@@ -115,6 +125,7 @@ class MCPToolFunctions:
         }
 
     def _source_for_read(self, path: str, source: str, attempt_id: str | None) -> tuple[str, str, str | None]:
+        # safe_relpath 会拒绝绝对路径和 ../；之后再做题目/草稿白名单检查。
         rel = safe_relpath(path)
         if rel not in self._template_files and not (self.workspace / rel).is_file():
             raise MCPToolError("file is not part of this task template or workspace")
@@ -140,6 +151,8 @@ class MCPToolFunctions:
     # Read tools
     # ------------------------------------------------------------------
     def read_problem(self, arguments: dict) -> dict:
+        # 只返回目录和元数据；完整题面按需通过 include_statement 控制，
+        # 避免每次 tool call 都把长题面塞进上下文。
         include_statement = bool(arguments.get("include_statement", True))
         editable = []
         readonly = []
@@ -207,6 +220,7 @@ class MCPToolFunctions:
     # Evaluation reads
     # ------------------------------------------------------------------
     def read_server_evaluation(self, arguments: dict) -> dict:
+        # 服务器测试结果单独存放，绝不能伪装成官方 normalized 结果。
         try:
             result = self.server_eval.read(str(arguments["evaluation_id"]))
         except ServerEvaluationError as exc:
@@ -256,6 +270,8 @@ class MCPToolFunctions:
     # Submissions
     # ------------------------------------------------------------------
     def submit_server_test(self, arguments: dict) -> dict:
+        # 保存快照后才提交；返回的 source_sha256 用于确认结果对应哪份源码。
+        # 服务器评测是异步的，所以这里只确认“已接收”，不等待结果。
         files = self._current_source_files()
         try:
             result = self.server_eval.submit(
@@ -274,6 +290,8 @@ class MCPToolFunctions:
         }
 
     def submit_official(self, arguments: dict) -> dict:
+        # 官方提交严格走 Scheduler：限频、额度、在途和 unknown 对账都在
+        # 调度器里执行，MCP 不能绕过，也不能直接碰 CANNJudge。
         task = self.tasks.get(self.task_id)
         if task["status"] != "running":
             raise MCPToolError(f"task is {task['status']}; task must be running to submit")

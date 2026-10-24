@@ -1,14 +1,12 @@
-"""Fixed-test server evaluation backend.
+"""固定测试集的服务器评测后端。
 
-The backend is deliberately command-based.  A deployment that has an Ascend
-NPU worker configures a command such as ``bash run.sh npu``; this module runs
-that command in a disposable copy of the submitted snapshot and records the
-real exit code/logs.  If the backend is not configured it returns
-``not_configured`` instead of inventing a device result.
+这里刻意做成“配置命令”模式：部署端在有 Ascend NPU 的机器上配置
+``bash run.sh npu``，本模块把提交快照复制到临时目录后执行，并记录真实
+退出码和日志。没有配置时返回 ``not_configured``，绝不编造 NPU 结果。
 
-The task's own ``run.sh`` is the fixed test entry: it compiles, generates the
-fixed test data, runs the kernel and verifies the reference output.  This is a
-server test, not an official CANNJudge result.
+题目自带的 ``run.sh`` 是固定测试入口：编译、生成固定测试数据、运行
+kernel、再用 ``sample.py verify`` 校验。它只是服务器测试，不等于
+CANNJudge 官方测试。
 """
 
 from __future__ import annotations
@@ -61,6 +59,8 @@ def _load_row(row: dict) -> dict:
 
 
 class ServerEvaluationService:
+    """服务器测试的提交、后台执行和结果查询。"""
+
     def __init__(self, settings: Settings, db: Database):
         self.settings = settings
         self.db = db
@@ -81,6 +81,8 @@ class ServerEvaluationService:
         return _load_row(row)
 
     def submit(self, task_id: str, files: dict[str, str], *, request_id: str | None = None) -> dict:
+        # request_id 是网络重试的幂等键：同一个值直接返回原来的 evaluation，
+        # 不会重复建快照，也不会重复占用服务器测试资源。
         existing = self._find_by_request(task_id, request_id)
         if existing:
             return _load_row(existing)
@@ -148,6 +150,8 @@ class ServerEvaluationService:
         )
 
     def _run(self, evaluation_id: str, files: dict[str, str], config: dict) -> None:
+        # 后台线程执行固定测试；状态先写 running，结束后写 completed/failed。
+        # 所有日志都截断后保存，避免一个死循环命令撑爆数据库。
         started = time.monotonic()
         result: dict[str, Any] = {
             "status": "running",
@@ -173,10 +177,12 @@ class ServerEvaluationService:
                     raise ServerEvaluationError("source path escapes evaluation workspace")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
+            # Windows 和 POSIX 的引号规则不同，这里按平台选择 shlex 模式。
             command = shlex.split(
                 config.get("command") or "bash run.sh npu",
                 posix=(os.name != "nt"),
             )
+            # 只透传 CANN/NPU 必需的变量，不把平台密钥或数据库配置传给测试进程。
             env = {
                 key: os.environ[key]
                 for key in (

@@ -1,11 +1,11 @@
-"""Minimal stdio MCP server for AscendForge.
+"""AscendForge 的最小 stdio MCP server。
 
-Run one server per task/session:
+每个任务启动一个进程：
 
     python -m ascendforge.mcp.server --task-id <task_id> --workspace <draft_dir>
 
-The process speaks JSON-RPC 2.0 over stdin/stdout.  Protocol logs go to stderr
-only, so they can never corrupt an MCP response.
+进程通过 stdin/stdout 收发 JSON-RPC 2.0；协议输出绝不能混入日志，
+因此所有诊断信息都写 stderr。
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ def _json_text(value: Any) -> str:
 
 
 class MCPServer:
+    """JSON-RPC 消息分发；不直接执行 shell，所有动作都落到 tool function。"""
+
     def __init__(self, functions: MCPToolFunctions | None = None):
         self.functions = functions
 
@@ -49,6 +51,8 @@ class MCPServer:
         params = message.get("params") or {}
         is_notification = "id" not in message
 
+        # MCP 客户端通常先 initialize，再发 notifications/initialized。
+        # 这里不做强制状态机，方便 Codex/其他客户端按自己的顺序握手。
         if method == "initialize":
             return self._result(
                 request_id,
@@ -137,6 +141,7 @@ def _read_message(stream) -> dict | None:
 
 
 def serve_stdio(functions: MCPToolFunctions | None) -> int:
+    # 一行一条 JSON-RPC；stdout 只写协议响应，任何 print 都不能出现在这里。
     server = MCPServer(functions)
     for raw in sys.stdin:
         text = raw.strip()
