@@ -139,14 +139,40 @@ last_message = float32 tiled vector experiment proposal
 
 It modified nothing and correctly remained read-only. This proves local Codex workspace execution and event parsing, not platform tool takeover.
 
-A mock-tested loop (`codex-loop`) now also:
+## 6.1 Codex app-server sessions
 
-- prepares a writable workspace from the current parent snapshot;
-- runs Codex, collects changed source files;
-- runs host preflight, saves an immutable snapshot, and creates an attempt;
-- requests the existing scheduler submission and waits for its real result;
-- resumes the Codex session with the result for the next round;
-- records `cli_runs` and leaves official sending to the worker.
+`codex-loop` now uses the Codex app-server rather than headless `codex exec`:
+
+1. starts `codex app-server --listen ws://127.0.0.1:<port>`;
+2. creates one durable thread per task with `cwd` set to the task workspace;
+3. sends each optimization round as `turn/start` on the same thread;
+4. streams `item/agentMessage/delta`, tool events and `turn/completed`;
+5. persists the thread id in `config.codex_session_ref`;
+6. resumes that thread for the next round instead of creating a new chat.
+
+The thread is stored in the normal Codex session directory, e.g.:
+
+```text
+C:\Users\JF\.codex\sessions\2026\10\24\rollout-...-<thread_id>.jsonl
+```
+
+Actual app-server write smoke:
+
+```text
+thread: 01a16d07-9605-7be1-a24b-b75085748d98
+prompt: edit workspace/kernel.asc to int f() { return 2; }
+result: file changed
+exit: 0
+```
+
+If the Codex client does not list the thread immediately, it can be opened from a terminal with:
+
+```bash
+codex resume <thread_id>
+```
+
+The same Web “Codex 运行” button starts this app-server loop. Codex still cannot
+submit to CANNJudge directly; only the host snapshots and scheduler submit.
 
 The Web task detail exposes “Codex 运行” for this local loop. Pause/stop now
 terminates the platform-started Codex process tree by PID; duplicate starts are
@@ -164,8 +190,13 @@ new tasks.
 
 ```text
 ascendforge/cli_agent/probe.py
-ascendforge/cli_agent/__init__.py
+ascendforge/cli_agent/codex.py
+ascendforge/cli_agent/app_server.py
+ascendforge/cli_agent/app_server_turn.mjs
+ascendforge/codex_loop.py
 tests/test_cli_agent_probe.py
+tests/test_cli_agent_codex.py
+tests/test_codex_loop.py
 ```
 
 提供：

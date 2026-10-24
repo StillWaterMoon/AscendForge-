@@ -49,6 +49,9 @@ class FakeAdapter:
     def collect_changes(self, workspace, baseline):
         return {"kernel.asc": (workspace / "kernel.asc").read_text(encoding="utf-8")}
 
+    def close(self):
+        pass
+
 
 class FakeWorker:
     def __init__(self, env):
@@ -82,7 +85,7 @@ class CodexLoopTests(unittest.TestCase):
         }
         worker = FakeWorker(env)
         with patch("ascendforge.codex_loop._services", return_value=(env.db, env.tasks, env.scheduler, worker)), patch(
-            "ascendforge.codex_loop.CodexAdapter", FakeAdapter
+            "ascendforge.codex_loop.AppServerAdapter", FakeAdapter
         ):
             result = run_codex_loop(env.settings, task["id"], rounds=1, keep_running=False)
         self.assertEqual(len(result["history"]), 1)
@@ -117,7 +120,7 @@ class CodexLoopTests(unittest.TestCase):
         adapter = FakeAdapter()
         worker = FakeWorker(env)
         with patch("ascendforge.codex_loop._services", return_value=(env.db, env.tasks, env.scheduler, worker)), patch(
-            "ascendforge.codex_loop.CodexAdapter", return_value=adapter
+            "ascendforge.codex_loop.AppServerAdapter", return_value=adapter
         ):
             result = run_codex_loop(env.settings, task["id"], rounds=2, keep_running=False)
         self.assertEqual(len(result["history"]), 2)

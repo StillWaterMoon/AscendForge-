@@ -674,6 +674,11 @@ async function renderTask(taskId) {
       <span>${esc(task.config.codex_runner_status || 'running')}</span>
       ${task.config.codex_runner_log ? `<span class="mono">${esc(String(task.config.codex_runner_log).split(/[\\/]/).pop())}</span>` : ''}
     </div>` : ''}
+    ${!task.config?.codex_runner_active && task.config?.codex_session_ref ? `<div class="experiment-strip codex-run-strip">
+      <span class="experiment-title">Codex 会话</span>
+      <span class="mono">${esc(task.config.codex_session_ref)}</span>
+      <span class="faint">可在 Codex 客户端打开同一 thread</span>
+    </div>` : ''}
 
     ${task.experiment?.id ? `<div class="experiment-strip">
       <span class="experiment-title">实验 #${esc(task.experiment.ordinal)} <span class="faint">${esc(task.experiment.status)}</span></span>

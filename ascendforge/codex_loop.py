@@ -17,7 +17,8 @@ from pathlib import Path
 
 from .agent.change_audit import audit_candidate
 from .agent.preflight import preflight_candidate
-from .cli_agent.codex import CodexAdapter, CodexRunResult
+from .cli_agent.app_server import AppServerAdapter
+from .cli_agent.codex import CodexRunResult
 from .config import Settings
 from .db import Database
 from .experiment_service import ensure_active
@@ -135,11 +136,11 @@ def run_codex_loop(
         "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
         (json_dumps(config), now(), task_id),
     )
-    adapter = CodexAdapter(timeout_sec=timeout_sec)
+    adapter = AppServerAdapter(timeout_sec=timeout_sec)
     experiment = ensure_active(db, task_id)
     base_parent, base_files = _parent_source(db, settings, task)
     workspace_root = Path(settings.data_dir) / "cli_workspaces" / task_id
-    session_ref: str | None = None
+    session_ref: str | None = config.get("codex_session_ref")
     history: list[dict] = []
     try:
         for round_index in range(1, max(1, rounds) + 1):
@@ -211,6 +212,12 @@ def run_codex_loop(
                     sandbox="workspace-write",
                 )
             session_ref = result.session_ref or session_ref
+            if session_ref:
+                config["codex_session_ref"] = session_ref
+                db.execute(
+                    "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                    (json_dumps(config), now(), task_id),
+                )
             changes = adapter.collect_changes(workspace, parent_files)
             run_started = now()
             _record_run(
@@ -318,6 +325,10 @@ def run_codex_loop(
                 continue
         return {"task_id": task_id, "rounds": rounds, "history": history, "session_ref": session_ref}
     finally:
+        try:
+            adapter.close()
+        except Exception:
+            pass
         try:
             current_task = tasks.get(task_id)
             current_config = dict(current_task.get("config") or {})

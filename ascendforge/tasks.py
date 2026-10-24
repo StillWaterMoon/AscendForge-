@@ -75,6 +75,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "codex_runner_status": None,
     "codex_runner_log": None,
     "codex_runner_started_at": None,
+    "codex_session_ref": None,
     "manual_only": False,
     "strategy_prompt": "",
 }
