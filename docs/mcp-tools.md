@@ -103,14 +103,15 @@ AddN 是多路输入逐元素累加算子...
 }
 ```
 
-- `path` 必须在题目模板或当前草稿目录内，禁止 `../` 和绝对路径；
+- `path` 必须是题目模板或当前草稿中的相对路径，禁止 `../` 和绝对路径；
 - `source`：
   - `workspace`：当前草稿；
   - `snapshot`：指定/最近一次候选快照；
   - `template`：原始题目模板；
-  - 省略时自动选择 workspace → snapshot → template；
+  - 省略时按文件逐个回退：workspace → 最近快照 → template；
 - 单文件最多 512 KiB；
-- 返回 `content`、`source`、`sha` 相关信息、`editable`。
+- **返回文件原文，不再包 JSON、hash、editable 等元数据**；
+- 文件不存在或路径非法时，MCP 返回 `isError=true`。
 
 典型读取：
 
@@ -120,6 +121,12 @@ AddN 是多路输入逐元素累加算子...
 {"path": "CMakeLists.txt"}
 {"path": "run.sh"}
 {"path": "kernel.asc", "source": "snapshot", "attempt_id": "att_xxx"}
+```
+
+MCP 返回：
+
+```text
+// readonly main
 ```
 
 ### 3. `read_server_evaluation`
