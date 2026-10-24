@@ -1024,11 +1024,10 @@ class Handler(BaseHTTPRequestHandler):
         if len(prompt) > 8000:
             raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
         config = dict(task.get("config") or {})
+        if config.get("codex_runner_active"):
+            raise ApiError(409, "CODEX_ALREADY_RUNNING", "该任务已有 Codex 运行中")
         config["execution_mode"] = "codex"
-        self.app.db.execute(
-            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-            (json_dumps(config), now(), task_id),
-        )
+        config["codex_runner_active"] = True
         log_path = self.app.settings.logs_dir / f"codex-{task_id}-{int(now())}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
@@ -1043,6 +1042,11 @@ class Handler(BaseHTTPRequestHandler):
         ]
         if prompt:
             command.extend(["--prompt", prompt])
+        config["codex_runner_log"] = str(log_path)
+        self.app.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
         env = os.environ.copy()
         env["PYTHONPATH"] = str(self.app.settings.root)
         env["ASCENDFORGE_DATA_DIR"] = str(self.app.settings.data_dir)
@@ -1057,6 +1061,14 @@ class Handler(BaseHTTPRequestHandler):
                 env=env,
                 creationflags=flags,
             )
+        except Exception:
+            config.pop("codex_runner_active", None)
+            config.pop("codex_runner_log", None)
+            self.app.db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            raise
         finally:
             handle.close()
         add_event(

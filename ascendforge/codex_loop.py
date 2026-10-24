@@ -15,6 +15,7 @@ import json
 import time
 from pathlib import Path
 
+from .agent.change_audit import audit_candidate
 from .agent.preflight import preflight_candidate
 from .cli_agent.codex import CodexAdapter, CodexRunResult
 from .config import Settings
@@ -244,6 +245,17 @@ def run_codex_loop(
 
             files = dict(parent_files)
             files.update(changes)
+            observed = audit_candidate(parent_files, files)
+            if not observed["effective"]:
+                update_attempt(
+                    db,
+                    attempt["id"],
+                    status="failed",
+                    error_code="CODEX_NO_EFFECTIVE_CHANGE",
+                    error_message="Codex changed only comments/whitespace; no source behavior changed",
+                    finished_at=now(),
+                )
+                raise CodexLoopError("Codex changed only comments/whitespace")
             check = preflight_candidate(files, json_loads(task.get("problem_json"), {}))
             if not check["ok"]:
                 update_attempt(
@@ -306,9 +318,16 @@ def run_codex_loop(
                 continue
         return {"task_id": task_id, "rounds": rounds, "history": history, "session_ref": session_ref}
     finally:
-        if not keep_running:
-            try:
-                if tasks.get(task_id)["status"] == "running":
-                    tasks.pause(task_id, reason="codex_loop_finished")
-            except Exception:
-                pass
+        try:
+            current_task = tasks.get(task_id)
+            current_config = dict(current_task.get("config") or {})
+            current_config.pop("codex_runner_active", None)
+            current_config["execution_mode"] = "codex"
+            db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(current_config), now(), task_id),
+            )
+            if not keep_running and current_task["status"] == "running":
+                tasks.pause(task_id, reason="codex_loop_finished")
+        except Exception:
+            pass
