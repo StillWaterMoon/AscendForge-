@@ -63,25 +63,47 @@ env = { PYTHONPATH = "D:\\AscendForge", ASCENDFORGE_DATA_DIR = "D:\\AscendForge\
 
 ### 1. `read_problem`
 
-参数：
+输入题目 URL：
 
 ```json
-{"include_statement": true}
+{
+  "url": "https://cannjudge.cn/public/vector/addn",
+  "include_statement": true
+}
 ```
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---:|---|---|
+| `url` | string | 是 | — | CANNJudge 题目页面 URL |
+| `include_statement` | boolean | 否 | `true` | 是否返回完整题面 |
+
+CANNJudge 页面是 SPA，正文由公开 API 返回。函数按 URL 定位题目并读取
+完整 `desc`，不截断；返回 `statement_format=markdown` 和
+`statement_length`。URL 不是当前任务题目时仍可读题，但不会把该题的
+文件范围冒充成当前任务的可编辑范围。
 
 返回：
 
 ```json
 {
+  "source_url": "https://cannjudge.cn/public/vector/addn",
   "task_id": "task_...",
-  "problem_id": "...",
-  "problem_name": "...",
+  "task_problem_url": "...",
+  "same_as_task": true,
+  "title": "AddN",
+  "problem_id": "6aa76a...",
+  "problem_name": "addn",
   "problem_url": "...",
-  "statement": "...",
-  "dtypes": "...",
-  "interface": "...",
-  "precision": "...",
+  "code_template": "npu_kernel_dev",
+  "statement": "完整题面 Markdown，全部内容",
+  "statement_format": "markdown",
+  "statement_length": 2653,
+  "dtypes": null,
+  "interface": null,
+  "precision": null,
+  "constraints": null,
   "testcase_count": 15,
+  "testcases": [{"testcase_id": {"_id": "...", "ID": 13166, "type": "default"}}],
   "file_directory": "...",
   "editable_scope": [{"path": "kernel.asc", "editable": true, "bytes": 1286}],
   "readonly_files": [{"path": "main.asc", "editable": false, "bytes": 5812}],
@@ -90,7 +112,7 @@ env = { PYTHONPATH = "D:\\AscendForge", ASCENDFORGE_DATA_DIR = "D:\\AscendForge\
 }
 ```
 
-`include_statement=false` 可用于只读取结构，避免题面很长时占用上下文。
+`include_statement=false` 只返回结构，不返回完整 `statement`。
 
 ### 2. `read_problem_file`
 
@@ -266,7 +288,7 @@ CLI 可以继续修改草稿；后续查询仍按 ID 对应到当时的快照，
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_problem","arguments":{}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_problem","arguments":{"url":"https://cannjudge.cn/public/vector/addn"}}}
 ```
 
 `tools/call` 成功返回：
@@ -298,7 +320,7 @@ db = Database(settings.db_path)
 db.init()
 tools = MCPToolFunctions(settings, db, "task_xxx", workspace="/path/to/draft")
 
-problem = tools.call("read_problem", {})
+problem = tools.call("read_problem", {"url": "https://cannjudge.cn/public/vector/addn"})
 kernel = tools.call("read_problem_file", {"path": "kernel.asc"})
 submitted = tools.call("submit_official", {"request_id": "round-42"})
 result = tools.call("read_official_evaluation", {"submission_id": submitted["submission_id"]})

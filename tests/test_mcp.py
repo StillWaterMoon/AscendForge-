@@ -32,6 +32,14 @@ class MCPToolTests(unittest.TestCase):
             tasks=self.env.tasks,
             scheduler=self.env.scheduler,
             server_eval=ServerEvaluationService(self.env.settings, self.env.db),
+            problem_reader=lambda url: {
+                "_id": self.task["problem_id"],
+                "name": "add",
+                "title": "Add",
+                "desc": "# Add\n\n" + ("完整题面内容\n" * 300),
+                "code_template": "npu_kernel_dev",
+                "testcases": [{"testcase_id": "case-1"}],
+            },
         )
 
     def tearDown(self):
@@ -51,10 +59,15 @@ class MCPToolTests(unittest.TestCase):
         )
 
     def test_read_problem_and_file(self):
-        problem = self.functions.call("read_problem", {})
+        problem = self.functions.call(
+            "read_problem", {"url": "https://cannjudge.cn/public/vector/add"}
+        )
         self.assertEqual(problem["task_id"], self.task["id"])
         self.assertIn("editable_scope", problem)
         self.assertIn("statement", problem)
+        self.assertEqual(problem["statement_format"], "markdown")
+        self.assertGreater(problem["statement_length"], 1000)
+        self.assertEqual(problem["testcase_count"], 1)
         file = self.functions.call("read_problem_file", {"path": "kernel.asc"})
         self.assertEqual(file["source"], "workspace")
         self.assertEqual(file["content"], "// current draft\n")
@@ -90,7 +103,7 @@ class MCPToolTests(unittest.TestCase):
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
-                "params": {"name": "read_problem", "arguments": {}},
+                "params": {"name": "read_problem_file", "arguments": {"path": "kernel.asc"}},
             },
         ]
         completed = subprocess.run(
@@ -117,7 +130,7 @@ class MCPToolTests(unittest.TestCase):
         self.assertEqual(len(responses[1]["result"]["tools"]), 6)
         self.assertFalse(responses[2]["result"]["isError"])
         payload = json.loads(responses[2]["result"]["content"][0]["text"])
-        self.assertEqual(payload["task_id"], self.task["id"])
+        self.assertEqual(payload["content"], "// current draft\n")
 
     def test_server_evaluation_command_runs_and_reports_logs(self):
         import time

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..config import Settings
 from ..db import Database
@@ -21,6 +21,7 @@ from ..experiments import (
     read_snapshot,
     update_attempt,
 )
+from ..platform.cannjudge import CannjudgeAdapter
 from ..platform.service import PlatformService
 from ..scheduler import Scheduler
 from ..security import CredentialStore, SecretBox, load_master_key
@@ -58,6 +59,7 @@ class MCPToolFunctions:
         tasks: TaskService | None = None,
         scheduler: Scheduler | None = None,
         server_eval: ServerEvaluationService | None = None,
+        problem_reader: Callable[[str], dict] | None = None,
     ):
         self.settings = settings
         self.db = db
@@ -70,6 +72,8 @@ class MCPToolFunctions:
         self.tasks = tasks or TaskService(db, settings, platform)
         self.scheduler = scheduler or Scheduler(db, settings, platform, self.tasks)
         self.server_eval = server_eval or ServerEvaluationService(settings, db)
+        # read_problem 按 URL 读取公开题面；默认用无凭据的 CANNJudge 适配器。
+        self.problem_reader = problem_reader or self._read_public_problem
         self._task = self.tasks.get(task_id)
         self._problem = json_loads(self._task.get("problem_json"), {})
         self._template = json_loads(self._task.get("template_json"), {})
@@ -150,42 +154,78 @@ class MCPToolFunctions:
     # ------------------------------------------------------------------
     # Read tools
     # ------------------------------------------------------------------
+    def _read_public_problem(self, url: str) -> dict:
+        # CANNJudge 前端是 SPA，真正的题面在公开 API 里。用无 cookie 的
+        # adapter 按页面 URL 解析到 problem 对象，不读取用户凭据。
+        adapter = CannjudgeAdapter(
+            base_url=self.settings.cannjudge_base_url,
+            timeout=30,
+        )
+        return adapter.resolve_problem(url)
+
     def read_problem(self, arguments: dict) -> dict:
-        # 只返回目录和元数据；完整题面按需通过 include_statement 控制，
-        # 避免每次 tool call 都把长题面塞进上下文。
+        # 以调用方给出的题目 URL 为准，返回该题的完整题面；不是拿当前
+        # 任务缓存里的题面凑数。
+        url = str(arguments["url"]).strip()
         include_statement = bool(arguments.get("include_statement", True))
+        try:
+            problem = self.problem_reader(url)
+        except Exception as exc:
+            raise MCPToolError(f"题目页面解析失败: {type(exc).__name__}: {exc}") from exc
+        if not isinstance(problem, dict) or not problem:
+            raise MCPToolError("题目页面没有返回有效题目数据")
+        statement = str(problem.get("desc") or problem.get("description") or "")
+        if include_statement and not statement.strip():
+            raise MCPToolError("题目页面没有可解析的题面内容")
+        task_problem_id = str(self._problem.get("_id") or self._task.get("problem_id") or "")
+        resolved_id = str(problem.get("_id") or problem.get("id") or "")
+        same_as_task = bool(resolved_id and task_problem_id and resolved_id == task_problem_id)
         editable = []
         readonly = []
-        for path, item in sorted(self._template_files.items()):
-            entry = {
-                "path": path,
-                "editable": bool(item.get("editable")),
-                "bytes": len(str(item.get("content") or "").encode("utf-8")),
-            }
-            (editable if entry["editable"] else readonly).append(entry)
+        if same_as_task:
+            for path, item in sorted(self._template_files.items()):
+                entry = {
+                    "path": path,
+                    "editable": bool(item.get("editable")),
+                    "bytes": len(str(item.get("content") or "").encode("utf-8")),
+                }
+                (editable if entry["editable"] else readonly).append(entry)
         latest = self._latest_snapshot_attempt()
+        testcases = problem.get("testcases") or []
         result = {
+            "source_url": url,
             "task_id": self.task_id,
-            "title": self._task.get("title"),
-            "problem_id": self._problem.get("_id") or self._task.get("problem_id"),
-            "problem_name": self._problem.get("name") or self._task.get("problem_title"),
-            "problem_url": self._task.get("problem_url"),
-            "code_template": self._problem.get("code_template"),
-            "dtypes": self._problem.get("dtypes") or self._problem.get("dtype"),
-            "interface": self._problem.get("interface") or self._problem.get("function"),
-            "precision": self._problem.get("precision") or self._problem.get("tolerance"),
-            "constraints": self._problem.get("constraints"),
-            "testcase_count": len(self._problem.get("testcases") or []),
-            "file_directory": str(self.workspace),
+            "task_problem_url": self._task.get("problem_url"),
+            "same_as_task": same_as_task,
+            "title": problem.get("title"),
+            "problem_id": resolved_id or None,
+            "problem_name": problem.get("name") or problem.get("canonical_name"),
+            "problem_url": problem.get("url") or url,
+            "code_template": problem.get("code_template"),
+            "dtypes": problem.get("dtypes") or problem.get("dtype"),
+            "interface": problem.get("interface") or problem.get("function"),
+            "precision": problem.get("precision") or problem.get("tolerance"),
+            "constraints": problem.get("constraints"),
+            "testcase_count": len(testcases),
+            "testcases": testcases,
+            "statement_format": "markdown",
+            "statement_length": len(statement),
+            "file_directory": str(self.workspace) if same_as_task else None,
             "editable_scope": editable,
             "readonly_files": readonly,
-            "template_file_count": len(self._template_files),
+            "template_file_count": len(self._template_files) if same_as_task else 0,
             "latest_candidate": latest["id"] if latest else None,
             "latest_candidate_snapshot": latest.get("snapshot_id") if latest else None,
             "statement_included": include_statement,
         }
+        if not same_as_task:
+            # 读题工具可以查看其他公开题目，但不能把别的题的文件范围
+            # 冒充成当前任务的可编辑范围。
+            result["task_scope_note"] = (
+                "URL 指向的题目与当前任务不是同一题；file_directory/editable_scope 未返回。"
+            )
         if include_statement:
-            result["statement"] = self._problem.get("description") or self._problem.get("desc") or ""
+            result["statement"] = statement
         return result
 
     def read_problem_file(self, arguments: dict) -> dict:

@@ -24,18 +24,25 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "read_problem",
         "description": (
-            "Read the imported problem: statement, interface/precision constraints, "
-            "file directory, editable scope, template file list and current attempt ids."
+            "Fetch a CANNJudge problem by its public URL, e.g. "
+            "https://cannjudge.cn/public/vector/addn, and return the complete statement, "
+            "interface/precision constraints, testcase metadata and task file scope."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "CANNJudge problem URL.",
+                },
                 "include_statement": {
                     "type": "boolean",
-                    "description": "Include the full problem statement (default true).",
-                }
+                    "description": "Include the complete statement (default true).",
+                },
             },
-            "required": [],
+            "required": ["url"],
             "additionalProperties": False,
         },
     },
