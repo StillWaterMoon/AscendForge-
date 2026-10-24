@@ -774,7 +774,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_tasks_create(self, session: dict | None = None, **_):
         body = self._read_json()
+        execution_mode = str(body.get("execution_mode") or "api").strip().lower()
+        if execution_mode not in ("api", "codex"):
+            raise ApiError(400, "BAD_EXECUTION_MODE", "execution_mode 必须是 api 或 codex")
         upload_id = str(body.get("project_upload_id") or "").strip()
+        if upload_id and execution_mode != "codex":
+            raise ApiError(400, "MODE_FIELD_MISMATCH", "只有本地 Codex 模式可以上传项目模板")
         project_archive = None
         if upload_id:
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", upload_id):
@@ -782,18 +787,39 @@ class Handler(BaseHTTPRequestHandler):
             project_archive = self.app.settings.tmp_dir / "uploads" / f"{upload_id}.zip"
             if not project_archive.is_file():
                 raise ApiError(400, "UPLOAD_NOT_FOUND", "项目模板上传已过期，请重新上传")
+        config = body.get("config") if isinstance(body.get("config"), dict) else {}
+        config = dict(config)
+        config["execution_mode"] = execution_mode
         task = self.app.tasks.create(
             title=str(body.get("title") or ""),
             problem_url=str(body.get("problem_url") or ""),
-            config=body.get("config") if isinstance(body.get("config"), dict) else {},
+            config=config,
             created_by=session["user_id"] if session else None,
             project_archive=project_archive,
         )
         self.app.db.insert(
             "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (session["username"] if session else None, "task_create", task["id"], "{}", now()),
+            (
+                session["username"] if session else None,
+                "task_create",
+                task["id"],
+                json_dumps({"execution_mode": execution_mode}),
+                now(),
+            ),
         )
-        return self.h_task_detail(task["id"])
+        codex_prompt = str(body.get("codex_prompt") or "").strip()
+        if len(codex_prompt) > 8000:
+            raise ApiError(400, "BAD_PROMPT", "Codex 初始指令不能超过 8000 字符")
+        task_detail = self.h_task_detail(task["id"])[1]["task"]
+        if execution_mode == "codex":
+            try:
+                task_detail["codex_run"] = self._launch_codex_runner(task["id"], codex_prompt, session)
+            except Exception as exc:
+                task_detail["codex_start_error"] = str(exc)
+                add_event(self.app.db, task["id"], None, "codex_auto_start_failed", {"error": str(exc)})
+            refreshed = self.app.tasks.get(task["id"])
+            task_detail["config"] = refreshed.get("config") or {}
+        return 200, {"task": task_detail}
 
     def h_task_detail(self, task_id: str, **_: Any):
         detail = self.app.tasks.detail(task_id)
@@ -1080,21 +1106,9 @@ class Handler(BaseHTTPRequestHandler):
         )
         return self.h_task_detail(task_id)
 
-    def h_codex_run(self, task_id: str, session: dict | None = None, **_):
+    def _launch_codex_runner(self, task_id: str, prompt: str, session: dict | None) -> dict:
+        """启动一个 Codex app-server 会话（Web 按钮和创建任务共用）。"""
         task = self.app.tasks.get(task_id)
-        if task["status"] not in ("running", "paused", "pending"):
-            if task["status"] not in ("completed", "stopped"):
-                raise ApiError(400, "BAD_STATE", "Codex 只能在 pending/paused/running/completed/stopped 任务上启动")
-            self.app.db.execute(
-                "UPDATE tasks SET status='paused', stop_reason=NULL, stopped_at=NULL, paused_at=?, updated_at=? WHERE id=?",
-                (now(), now(), task_id),
-            )
-            add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
-            task = self.app.tasks.get(task_id)
-        body = self._read_json()
-        prompt = str(body.get("prompt") or "").strip()
-        if len(prompt) > 8000:
-            raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
         config = dict(task.get("config") or {})
         if config.get("codex_runner_active"):
             raise ApiError(409, "CODEX_ALREADY_RUNNING", "该任务已有 Codex 运行中")
@@ -1162,13 +1176,30 @@ class Handler(BaseHTTPRequestHandler):
             "codex_run_started",
             {"pid": process.pid, "mode": "continuous_until_manual_pause", "log": str(log_path), "actor": (session or {}).get("username")},
         )
-        return 200, {
+        return {
             "started": True,
             "pid": process.pid,
             "mode": "continuous_until_manual_pause",
             "log": str(log_path),
             "task": self.app.tasks.get(task_id),
         }
+
+    def h_codex_run(self, task_id: str, session: dict | None = None, **_):
+        task = self.app.tasks.get(task_id)
+        if task["status"] not in ("running", "paused", "pending"):
+            if task["status"] not in ("completed", "stopped"):
+                raise ApiError(400, "BAD_STATE", "Codex 只能在 pending/paused/running/completed/stopped 任务上启动")
+            self.app.db.execute(
+                "UPDATE tasks SET status='paused', stop_reason=NULL, stopped_at=NULL, paused_at=?, updated_at=? WHERE id=?",
+                (now(), now(), task_id),
+            )
+            add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
+            task = self.app.tasks.get(task_id)
+        body = self._read_json()
+        prompt = str(body.get("prompt") or "").strip()
+        if len(prompt) > 8000:
+            raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
+        return 200, self._launch_codex_runner(task_id, prompt, session)
 
     def h_task_messages(self, task_id: str, **_: Any):
         task = self.app.tasks.get(task_id)

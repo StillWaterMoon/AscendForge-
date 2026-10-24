@@ -419,38 +419,40 @@ class TaskService:
         problem = imported["problem"]
         template = imported["template"]
         package = imported["package"]
-        project_source = "empty"
+        project_source = "platform"
         project_sha = None
         project_archive_rel = None
-        project_file_count = 0
-        if project_archive is not None:
-            upload = Path(project_archive).resolve()
-            upload_root = (self.settings.tmp_dir / "uploads").resolve()
-            if upload_root not in upload.parents or not upload.is_file():
-                shutil.rmtree(directory, ignore_errors=True)
-                raise TaskError("BAD_PROJECT_TEMPLATE", "上传的项目模板不存在或已过期")
-            try:
-                template, project_sha = _uploaded_template(upload, directory)
-            except TaskError:
-                shutil.rmtree(directory, ignore_errors=True)
-                raise
-            saved = directory / "project-template.zip"
-            shutil.copyfile(upload, saved)
-            project_archive_rel = str(saved.relative_to(self.settings.data_dir)).replace("\\", "/")
-            project_source = "upload"
-            project_file_count = len(template["files"])
-            upload.unlink(missing_ok=True)
-        else:
-            # 用户没有上传模板：明确从空项目开始，不再注入平台模板。
+        project_file_count = len(template.get("files") or [])
+        if project_archive is not None and normalized["execution_mode"] != "codex":
+            shutil.rmtree(directory, ignore_errors=True)
+            raise TaskError("MODE_FIELD_MISMATCH", "只有本地 Codex 模式可以上传项目模板")
+        if normalized["execution_mode"] == "codex":
+            # Codex 模式：上传 ZIP 就从该工程开始；没上传就是空项目。
+            # API 模式仍使用平台导入的模板，保持原有行为。
             template = {"files": [], "source": "empty"}
-        if project_source == "upload":
-            normalized["project_source"] = "upload"
-            normalized["project_template_sha256"] = project_sha
-            normalized["project_template_archive"] = project_archive_rel
-            normalized["project_template_files"] = project_file_count
-        else:
-            normalized["project_source"] = "empty"
-            normalized["project_template_files"] = 0
+            project_source = "empty"
+            project_file_count = 0
+            if project_archive is not None:
+                upload = Path(project_archive).resolve()
+                upload_root = (self.settings.tmp_dir / "uploads").resolve()
+                if upload_root not in upload.parents or not upload.is_file():
+                    shutil.rmtree(directory, ignore_errors=True)
+                    raise TaskError("BAD_PROJECT_TEMPLATE", "上传的项目模板不存在或已过期")
+                try:
+                    template, project_sha = _uploaded_template(upload, directory)
+                except TaskError:
+                    shutil.rmtree(directory, ignore_errors=True)
+                    raise
+                saved = directory / "project-template.zip"
+                shutil.copyfile(upload, saved)
+                project_archive_rel = str(saved.relative_to(self.settings.data_dir)).replace("\\", "/")
+                project_source = "upload"
+                project_file_count = len(template["files"])
+                upload.unlink(missing_ok=True)
+        normalized["project_source"] = project_source
+        normalized["project_template_sha256"] = project_sha
+        normalized["project_template_archive"] = project_archive_rel
+        normalized["project_template_files"] = project_file_count
         package_path = Path(package["archive"])
         package_rel = str(package_path.relative_to(self.settings.data_dir)).replace("\\", "/")
         problem_title = str(problem.get("name") or problem.get("title") or problem.get("_id"))

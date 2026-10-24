@@ -41,6 +41,7 @@ class ProjectTemplateTests(unittest.TestCase):
         task = self.env.tasks.create(
             title="Uploaded task",
             problem_url=PROBLEM_URL,
+            config={"execution_mode": "codex"},
             project_archive=archive,
         )
         files = {item["path"]: item["content"] for item in task["template"]["files"]}
@@ -56,7 +57,11 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertTrue((self.env.settings.data_dir / task["config"]["project_template_archive"]).is_file())
 
     def test_no_upload_starts_from_empty_project(self):
-        task = self.env.tasks.create(title="Empty task", problem_url=PROBLEM_URL)
+        task = self.env.tasks.create(
+            title="Empty task",
+            problem_url=PROBLEM_URL,
+            config={"execution_mode": "codex"},
+        )
         self.assertEqual(task["template"]["files"], [])
         self.assertEqual(task["config"]["project_source"], "empty")
         self.assertEqual(task["config"]["project_template_files"], 0)
@@ -68,4 +73,9 @@ class ProjectTemplateTests(unittest.TestCase):
             {"../evil.asc": "// escape\n"},
         )
         with self.assertRaises(TaskError):
-            self.env.tasks.create(title="Bad task", problem_url=PROBLEM_URL, project_archive=archive)
+            self.env.tasks.create(
+                title="Bad task",
+                problem_url=PROBLEM_URL,
+                config={"execution_mode": "codex"},
+                project_archive=archive,
+            )

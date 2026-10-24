@@ -842,3 +842,26 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
   font-size: 12px;
   overflow: auto;
 }
+.segmented {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.segmented label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fffdf8;
+  cursor: pointer;
+}
+.segmented label:has(input:checked) {
+  border-color: var(--accent);
+  background: #f5eee2;
+  font-weight: 600;
+}
+.segmented input {
+  accent-color: var(--accent);
+}

@@ -530,19 +530,25 @@ async function openNewTaskModal() {
   const configured = modelData.model?.configured;
   openModal('新建优化任务', `
     ${!connected ? `<div class="alert warn">CANNJudge 尚未连接。任务创建会先验证账号能否连接 judge。<a href="#/platform" data-close-and-go="#/platform">前往连接</a></div>` : ''}
-    ${!configured ? `<div class="alert warn">模型 API 尚未配置。可以创建任务，但启动后需要模型才能推进。<a href="#/settings" data-close-and-go="#/settings">前往配置</a></div>` : ''}
     <form id="new-task-form" class="stack">
       <div class="form-grid">
         <div class="field span-2"><label for="nt-title">任务标题</label><input id="nt-title" type="text" maxlength="120" placeholder="例如：Add 核函数 · 第一轮优化" required></div>
         <div class="field span-2"><label for="nt-url">CANNJudge 题目链接</label><input id="nt-url" type="url" placeholder="https://cannjudge.cn/hc_cann_codelabs/cann/add" required>
           <div class="hint">必须是完整的小组/比赛/题目链接；用于读取题面和官方提交。</div></div>
-        <div class="field span-2"><label for="nt-project">项目模板 ZIP（可选）</label><input id="nt-project" type="file" accept=".zip,application/zip">
-          <div class="hint">上传后 Codex 从该工程开始；不上传就是空项目，由 Codex 从 0 创建。</div></div>
+        <div class="field span-2"><label>执行模式</label>
+          <div class="segmented">
+            <label><input type="radio" name="nt-mode" value="api" checked> LLM API</label>
+            <label><input type="radio" name="nt-mode" value="codex"> 本地 Codex</label>
+          </div>
+          <div class="hint" id="nt-mode-hint">使用设置页配置的模型 API，由服务器 Agent 循环执行。</div>
+        </div>
         <div class="field span-2"><label for="nt-strategy">题目策略（可选）</label>
           <textarea id="nt-strategy" rows="4" maxlength="8000" placeholder="例如：本题进入性能优化阶段，重点研究 UB 分块与 DataCopy 重叠；先保证 int8/int16/int32/fp16/fp32 全部正确，再优化。"></textarea>
-          <div class="hint">只放题目目标、约束和待验证假设；通用优化方法由 optimize-operator skill 提供。</div>
+          <div class="hint">只放题目目标、约束和待验证假设。</div>
         </div>
       </div>
+      <div id="nt-api-pane" class="stack">
+        ${!configured ? `<div class="alert warn">模型 API 尚未配置。可以创建任务，但启动后需要模型才能推进。<a href="#/settings" data-close-and-go="#/settings">前往配置</a></div>` : ''}
       <details class="advanced">
         <summary>预算与调度（可选）</summary>
         <div class="form-grid" style="margin-top:12px">
@@ -568,12 +574,37 @@ async function openNewTaskModal() {
           <div class="field"><label>Agent 每轮最多步骤</label><input id="cfg-agent-steps" type="number" min="1" max="30" value="10"></div>
         </div>
       </details>
+      </div>
+      <div id="nt-codex-pane" class="stack" hidden>
+        <div class="field"><label for="nt-project">项目模板 ZIP（可选）</label><input id="nt-project" type="file" accept=".zip,application/zip">
+          <div class="hint">上传后 Codex 从该工程开始；不上传就是空项目，由 Codex 从 0 创建。</div></div>
+        <div class="field"><label for="nt-codex-prompt">Codex 初始指令（可选）</label>
+          <textarea id="nt-codex-prompt" rows="4" maxlength="8000" placeholder="例如：先阅读题面，检查模板；优先保证全部 dtype 正确，再优化性能。"></textarea>
+        </div>
+        <div class="alert info">创建任务后会自动新建 Codex 会话并发送初始 skill。当前 skill 为占位内容：<span class="mono">HELLO！ HELLO</span>。</div>
+      </div>
       <div class="alert error" id="new-task-error" hidden></div>
       <div class="form-actions">
         <button class="btn" type="button" data-modal-close>取消</button>
         <button class="btn btn-primary" type="submit">导入题目并创建</button>
       </div>
     </form>`);
+  const applyMode = (mode) => {
+    const apiPane = $('#nt-api-pane');
+    const codexPane = $('#nt-codex-pane');
+    if (apiPane) apiPane.hidden = mode !== 'api';
+    if (codexPane) codexPane.hidden = mode !== 'codex';
+    const hint = $('#nt-mode-hint');
+    if (hint) {
+      hint.textContent = mode === 'api'
+        ? '使用设置页配置的模型 API，由服务器 Agent 循环执行。'
+        : '使用本机 Codex CLI；创建任务后自动建立会话并发送初始 skill。';
+    }
+  };
+  $$('input[name="nt-mode"]').forEach((input) => {
+    input.addEventListener('change', () => applyMode(input.value));
+  });
+  applyMode('api');
   $('#new-task-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorBox = $('#new-task-error');
@@ -581,7 +612,8 @@ async function openNewTaskModal() {
     const button = event.target.querySelector('button[type="submit"]');
     button.disabled = true;
     button.textContent = '正在创建任务…';
-    const config = {};
+    const mode = $('input[name="nt-mode"]:checked').value;
+    const config = { execution_mode: mode };
     const putNum = (id, key, integer = true) => {
       const raw = $(id).value.trim();
       if (raw === '') return;
@@ -589,49 +621,62 @@ async function openNewTaskModal() {
       if (!Number.isFinite(value)) return;
       config[key] = integer ? Math.trunc(value) : value;
     };
-    putNum('#cfg-max-task-subs', 'max_submissions_per_task');
-    putNum('#cfg-max-day-subs', 'max_submissions_per_day');
-    putNum('#cfg-interval', 'min_submit_interval_sec');
-    putNum('#cfg-inflight', 'max_inflight');
-    putNum('#cfg-max-attempts', 'max_attempts');
-    putNum('#cfg-max-calls', 'max_model_calls');
-    putNum('#cfg-max-tokens', 'max_tokens');
-    putNum('#cfg-max-runtime', 'max_runtime_sec');
-    putNum('#cfg-max-stall', 'max_stall_rounds');
-    putNum('#cfg-agent-steps', 'agent_max_steps');
-    putNum('#cfg-max-cost', 'max_cost', false);
-    putNum('#cfg-target', 'target_score', false);
-    config.metric = $('#cfg-metric').value;
-    if ($('#cfg-time-unit').value.trim()) config.time_unit = $('#cfg-time-unit').value.trim();
+    if (mode === 'api') {
+      putNum('#cfg-max-task-subs', 'max_submissions_per_task');
+      putNum('#cfg-max-day-subs', 'max_submissions_per_day');
+      putNum('#cfg-interval', 'min_submit_interval_sec');
+      putNum('#cfg-inflight', 'max_inflight');
+      putNum('#cfg-max-attempts', 'max_attempts');
+      putNum('#cfg-max-calls', 'max_model_calls');
+      putNum('#cfg-max-tokens', 'max_tokens');
+      putNum('#cfg-max-runtime', 'max_runtime_sec');
+      putNum('#cfg-max-stall', 'max_stall_rounds');
+      putNum('#cfg-agent-steps', 'agent_max_steps');
+      putNum('#cfg-max-cost', 'max_cost', false);
+      putNum('#cfg-target', 'target_score', false);
+      config.metric = $('#cfg-metric').value;
+      if ($('#cfg-time-unit').value.trim()) config.time_unit = $('#cfg-time-unit').value.trim();
+    }
     if ($('#nt-strategy').value.trim()) config.strategy_prompt = $('#nt-strategy').value.trim();
     try {
       let projectUploadId = null;
-      const file = $('#nt-project').files?.[0];
-      if (file) {
-        button.textContent = '正在上传项目模板…';
-        const uploaded = await uploadProjectTemplate(file);
-        projectUploadId = uploaded.upload_id;
+      if (mode === 'codex') {
+        const file = $('#nt-project').files?.[0];
+        if (file) {
+          button.textContent = '正在上传项目模板…';
+          const uploaded = await uploadProjectTemplate(file);
+          projectUploadId = uploaded.upload_id;
+        }
+        button.textContent = '正在创建 Codex 会话…';
+      } else {
+        button.textContent = '正在创建任务…';
       }
-      button.textContent = '正在创建任务…';
       const data = await api('/api/tasks', {
         method: 'POST',
         body: {
           title: $('#nt-title').value.trim(),
           problem_url: $('#nt-url').value.trim(),
+          execution_mode: mode,
           project_upload_id: projectUploadId,
+          codex_prompt: mode === 'codex' ? $('#nt-codex-prompt').value : '',
           config,
         },
         requestId: uuid(),
       });
       closeModal();
-      toast(projectUploadId ? '任务已创建，项目模板已导入' : '任务已创建，空项目从 0 开始', 'success');
+      if (mode === 'codex') {
+        const codexError = data.task?.codex_start_error;
+        toast(codexError ? `任务已创建，但 Codex 启动失败：${codexError}` : '任务已创建，Codex 会话已启动', codexError ? 'error' : 'success');
+      } else {
+        toast('任务已创建，使用 LLM API 模式', 'success');
+      }
       navigate(`#/tasks/${data.task.id}`);
     } catch (err) {
       errorBox.hidden = false;
       errorBox.className = 'alert error';
       errorBox.textContent = err.message || '创建失败';
       button.disabled = false;
-      button.textContent = '导入题目并创建';
+      button.textContent = '创建任务';
       if (err.code === 'ACCOUNT_CANNOT_CONNECT_JUDGE') {
         errorBox.innerHTML += ' <a href="#/platform" data-close-and-go="#/platform">前往平台连接</a>';
       }

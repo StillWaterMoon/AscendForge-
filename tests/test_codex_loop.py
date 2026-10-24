@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ascendforge.codex_loop import run_codex_loop
+from ascendforge.codex_loop import run_codex_agent, run_codex_loop
 from ascendforge.experiments import read_snapshot
 
 from tests.helpers import make_env, seed_attempt, seed_task
@@ -48,6 +48,33 @@ class FakeAdapter:
 
     def collect_changes(self, workspace, baseline):
         return {"kernel.asc": (workspace / "kernel.asc").read_text(encoding="utf-8")}
+
+    def close(self):
+        pass
+
+
+class CaptureAgentAdapter:
+    def __init__(self, **kwargs):
+        self.prompts = []
+
+    def prepare_workspace(self, root, files, **kwargs):
+        workspace = Path(root) / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
+
+    def start(self, prompt, *, workspace, output_file, model=None, **kwargs):
+        self.prompts.append(prompt)
+        Path(output_file).write_text("placeholder", encoding="utf-8")
+        return SimpleNamespace(
+            session_ref="session-placeholder",
+            run_id="run-placeholder",
+            exit_code=1,
+            timed_out=False,
+            usage={},
+            last_message="placeholder",
+            stderr="",
+            error="stop test",
+        )
 
     def close(self):
         pass
@@ -102,6 +129,21 @@ class CodexLoopTests(unittest.TestCase):
         runs = env.db.query("SELECT * FROM cli_runs WHERE task_id=?", (task["id"],))
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["backend"], "codex")
+
+    def test_codex_agent_sends_placeholder_skill_and_does_not_autopause(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-codex-agent-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running", title="Codex agent", config={"execution_mode": "codex"})
+        adapter = CaptureAgentAdapter()
+        worker = FakeWorker(env)
+        with patch("ascendforge.codex_loop._services", return_value=(env.db, env.tasks, env.scheduler, worker)), patch(
+            "ascendforge.codex_loop.AppServerAdapter", return_value=adapter
+        ):
+            result = run_codex_agent(env.settings, task["id"], timeout_sec=10)
+        self.assertEqual(result["turns"], 1)
+        self.assertIn("HELLO！ HELLO", adapter.prompts[0])
+        # 工具驱动会话结束时不能自动暂停，只有用户能暂停。
+        self.assertEqual(env.tasks.get(task["id"])["status"], "running")
 
     def test_codex_loop_resumes_session_for_second_round(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-loop2-"))

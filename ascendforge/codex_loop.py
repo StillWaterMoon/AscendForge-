@@ -432,16 +432,18 @@ def run_codex_agent(
                 },
                 instructions="Use the provided dynamic tools; do not attempt to submit outside them.",
             )
-        skill_path = Path(settings.root) / "skills" / "start-operator-optimization" / "SKILL.md"
-        skill_text = skill_path.read_text(encoding="utf-8") if skill_path.exists() else ""
+        # 第一阶段先验证“创建任务 → 自动建 Codex 会话 → 发送 skill”链路，
+        # skill 内容暂时占位；后续把真实 SKILL.md 注入这里即可。
+        placeholder_skill = "HELLO！ HELLO"
         startup = (
-            "使用 start-operator-optimization 开展持续算子优化。\n"
-            f"任务 ID：{task_id}\n工作目录：{workspace}\n"
-            "通过已连接的工具读取任务、历史、源码，保存候选并提交真实评测。\n"
-            "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
-            "每次提交后必须根据真实结果决定修复、继续、回退或更换方向。\n\n"
-            + skill_text
+            "初始 skill（占位）：\n"
+            + placeholder_skill
             + "\n\n"
+            + "使用上述 skill 开展持续算子优化。\n"
+            + f"任务 ID：{task_id}\n工作目录：{workspace}\n"
+            + "通过已连接的工具读取任务、历史、源码，保存候选并提交真实评测。\n"
+            + "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
+            + "每次提交后必须根据真实结果决定修复、继续、回退或更换方向。\n\n"
             + (prompt or "")
         )
         turns = 0

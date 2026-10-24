@@ -196,9 +196,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200, payload)
         task = payload["task"]
         self.assertEqual(task["title"], "API created")
-        # 没有上传项目模板时必须从空项目开始，不再注入平台模板。
-        self.assertEqual(task["template"]["files"], [])
-        self.assertEqual(task["config"]["project_source"], "empty")
+        # API 模式沿用平台导入的模板。
+        self.assertTrue(task["template"]["files"])
+        self.assertEqual(task["config"]["execution_mode"], "api")
+        self.assertEqual(task["config"]["project_source"], "platform")
         self.assertEqual(task["config"]["max_submissions_per_task"], 5)
 
         status, payload = self.client.request("GET", f"/api/tasks/{task['id']}")
@@ -243,15 +244,15 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200, payload)
         self.assertEqual(payload["task"]["messages"][-1]["content"], "下一轮优先检查 int16 的符号位")
 
-        # 空项目没有可编辑文件，不能直接提交基线。
+        # API 模式沿用平台模板，可以直接提交基线。
         status, payload = self.client.request(
             "POST",
             f"/api/tasks/{task['id']}/baseline-submit",
             {"confirm": True},
             csrf=self.csrf,
         )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"]["code"], "NO_EDITABLE_TEMPLATE")
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
 
     def _download(self, path):
         request = urllib.request.Request(
@@ -285,32 +286,32 @@ class WebTests(unittest.TestCase):
         self.assertTrue(uploaded["upload_id"])
         self.assertEqual(uploaded["file_count"], 2)
 
-        status, payload = self.client.request(
-            "POST",
-            "/api/tasks",
-            {
-                "title": "Uploaded project",
-                "problem_url": "https://cannjudge.cn/hc_cann_codelabs/cann/add",
-                "project_upload_id": uploaded["upload_id"],
-            },
-            csrf=self.csrf,
-        )
+        from unittest.mock import patch
+
+        with patch("ascendforge.web.subprocess.Popen") as popen:
+            popen.return_value.pid = 43211
+            status, payload = self.client.request(
+                "POST",
+                "/api/tasks",
+                {
+                    "title": "Uploaded project",
+                    "problem_url": "https://cannjudge.cn/hc_cann_codelabs/cann/add",
+                    "execution_mode": "codex",
+                    "project_upload_id": uploaded["upload_id"],
+                },
+                csrf=self.csrf,
+            )
         self.assertEqual(status, 200, payload)
         task = payload["task"]
         self.assertEqual(task["config"]["project_source"], "upload")
         self.assertEqual(task["config"]["project_template_files"], 2)
+        self.assertEqual(task["config"]["execution_mode"], "codex")
+        self.assertTrue(task["config"]["codex_runner_active"])
         self.assertEqual(
             {item["path"] for item in task["template"]["files"]},
             {"kernel.asc", "run.sh"},
         )
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/baseline-submit",
-            {"confirm": True},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
+        self.assertTrue(task.get("codex_run"))
 
     def test_05_task_archive_download(self):
         data = self._download(f"/api/tasks/{self.task['id']}/archive")
