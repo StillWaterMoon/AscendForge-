@@ -8,6 +8,7 @@ Codex clients while the host still owns snapshotting and official submission.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -45,7 +46,13 @@ class AppServerAdapter:
         self.tools = tools or []
         self.thread_name = thread_name or ""
         self.node = shutil.which("node") or "node"
+        self.port = 0
+        self.server = None
+        self._start_server()
+
+    def _start_server(self) -> None:
         self.port = _free_port()
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         self.server = subprocess.Popen(
             [self.executable, "app-server", "--listen", f"ws://127.0.0.1:{self.port}"],
             # app-server treats stdin EOF as a shutdown signal; keep it open.
@@ -53,6 +60,8 @@ class AppServerAdapter:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            creationflags=flags,
+            start_new_session=os.name != "nt",
         )
         # The server binds quickly; a short retry is cheaper than guessing.
         deadline = time.monotonic() + 20
@@ -76,13 +85,38 @@ class AppServerAdapter:
         self.close()
         raise RuntimeError(f"Codex app-server did not start: {detail[-1000:]}")
 
-    def close(self) -> None:
-        if getattr(self, "server", None) and self.server.poll() is None:
-            self.server.terminate()
+    def _stop_server(self) -> None:
+        server = getattr(self, "server", None)
+        if not server or server.poll() is not None:
+            return
+        try:
+            if os.name == "nt":
+                # app-server.cmd launches node/codex children. terminate() only
+                # kills the cmd wrapper and leaves those children orphaned.
+                subprocess.run(
+                    ["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+            else:
+                os.killpg(server.pid, 15)
+        except Exception:
             try:
-                self.server.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.server.kill()
+                server.terminate()
+            except Exception:
+                pass
+        try:
+            server.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+
+    def close(self) -> None:
+        self._stop_server()
+
+    def _restart_server(self) -> None:
+        self._stop_server()
+        self._start_server()
 
     def prepare_workspace(self, directory: Path, files: dict[str, str], **kwargs) -> Path:
         # Reuse the file-layout behavior without instantiating a second adapter.
@@ -114,7 +148,7 @@ class AppServerAdapter:
                     changes[rel] = new
         return changes
 
-    def _turn(self, prompt: str, workspace: Path, thread: str | None, output_file: Path) -> CodexRunResult:
+    def _run_bridge(self, prompt: str, workspace: Path, thread: str | None, output_file: Path) -> CodexRunResult:
         script = Path(__file__).with_name("app_server_turn.mjs")
         tools_file = Path(output_file).parent / "codex-tools.json"
         tools_file.write_text(json.dumps(self.tools, ensure_ascii=False), encoding="utf-8")
@@ -230,6 +264,18 @@ class AppServerAdapter:
             timed_out=timed_out,
             error=error,
         )
+
+    def _turn(self, prompt: str, workspace: Path, thread: str | None, output_file: Path) -> CodexRunResult:
+        result = self._run_bridge(prompt, workspace, thread, output_file)
+        if result.error and "websocket connection failed" in result.error.lower():
+            # A transient port/handshake race is recoverable without changing
+            # the thread. Restart only the app-server transport and retry once.
+            try:
+                self._restart_server()
+                return self._run_bridge(prompt, workspace, thread, output_file)
+            except Exception as exc:
+                result.error = f"{result.error}; bridge restart failed: {exc}"
+        return result
 
     def start(self, prompt: str, *, workspace: Path, output_file: Path, sandbox: str = "workspace-write", model: str | None = None) -> CodexRunResult:
         return self._turn(prompt, workspace, None, output_file)
