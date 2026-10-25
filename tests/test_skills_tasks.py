@@ -146,6 +146,27 @@ class TaskStateTests(unittest.TestCase):
         self.assertNotIn("codex_runner_pid", refreshed["config"])
         self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
 
+    def test_delete_removes_task_rows_and_files(self):
+        task = seed_task(self.env, status="stopped")
+        attempt = seed_attempt(self.env, task)
+        task_dir = self.env.settings.tasks_dir / task["id"]
+        self.assertTrue(task_dir.exists())
+        result = self.env.tasks.delete(task["id"], actor="test")
+        self.assertTrue(result["deleted"])
+        self.assertNotIn("tasks", result["warnings"])
+        self.assertFalse(task_dir.exists())
+        self.assertIsNone(self.env.db.query_one("SELECT id FROM tasks WHERE id=?", (task["id"],)))
+        self.assertIsNone(self.env.db.query_one("SELECT id FROM attempts WHERE id=?", (attempt["id"],)))
+        self.assertIsNone(
+            self.env.db.query_one("SELECT id FROM snapshots WHERE task_id=?", (task["id"],))
+        )
+
+    def test_delete_rejects_running_task(self):
+        task = seed_task(self.env, status="running", config={"execution_mode": "codex"})
+        with self.assertRaises(TaskError) as raised:
+            self.env.tasks.delete(task["id"])
+        self.assertEqual(raised.exception.code, "TASK_RUNNING")
+
     def test_config_validation(self):
         with self.assertRaises(TaskError):
             normalize_config({"max_inflight": 9})

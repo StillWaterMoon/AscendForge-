@@ -496,6 +496,7 @@ h3 { font-size: 15.5px; letter-spacing: -0.012em; }
 }
 .task-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 74%; }
 .task-error:empty { visibility: hidden; }
+.task-delete { margin-left: auto; padding: 2px 8px; font-size: 10px; line-height: 1.4; }
 
 /* attempt testcase list */
 .case-summary {

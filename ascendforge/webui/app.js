@@ -449,6 +449,7 @@ async function renderDashboard() {
             <div class="task-card-foot">
               <span class="task-error">${esc(error || taskFootNote(task))}</span>
               <span class="faint mono">${esc(fmtTime(task.updated_at))}</span>
+              ${task.status !== 'running' ? `<button class="btn btn-sm btn-ghost task-delete" data-task-delete="${esc(task.id)}" type="button" title="删除任务及其本地文件">删除</button>` : ''}
             </div>
           </article>`;
         }).join('')}
@@ -457,6 +458,24 @@ async function renderDashboard() {
 
   $('#new-task').addEventListener('click', () => openNewTaskModal().catch((e) => toast(e.message || '打开表单失败', 'error')));
   $('#refresh-dashboard').addEventListener('click', () => renderDashboard().catch((e) => toast(e.message, 'error')));
+  $$('[data-task-delete]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const task = tasks.find((item) => item.id === button.dataset.taskDelete);
+      if (!task) return;
+      if (!confirm(`删除任务“${task.title}”？会同时删除快照、workspace、日志和提交记录，不能恢复。`)) return;
+      button.disabled = true;
+      try {
+        const result = await api(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' });
+        toast(result.warnings?.length ? `任务已删除，但有 ${result.warnings.length} 个文件未清理` : '任务已删除', result.warnings?.length ? 'error' : 'success');
+        await renderDashboard();
+      } catch (err) {
+        button.disabled = false;
+        toast(err.message || '删除失败', 'error');
+      }
+    });
+  });
   $$('[data-task-open]').forEach((row) => {
     row.addEventListener('click', () => navigate(`#/tasks/${row.dataset.taskOpen}`));
     row.addEventListener('keydown', (event) => {

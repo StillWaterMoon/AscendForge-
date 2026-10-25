@@ -233,6 +233,7 @@ class App:
             ("GET", r"^/api/summary$", "h_summary", False, True),
             ("GET", r"^/api/tasks$", "h_tasks_list", False, True),
             ("POST", r"^/api/tasks$", "h_tasks_create", False, False),
+            ("DELETE", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_delete", False, False),
             ("POST", r"^/api/project-templates$", "h_project_template_upload", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
@@ -875,6 +876,13 @@ class Handler(BaseHTTPRequestHandler):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         return 200, {"task": detail}
+
+    def h_task_delete(self, task_id: str, session: dict | None = None, **_):
+        result = self.app.tasks.delete(
+            task_id,
+            actor=(session or {}).get("username", "user"),
+        )
+        return 200, result
 
     def h_baseline_submit(self, task_id: str, session: dict | None = None, **_):
         body = self._read_json()

@@ -349,6 +349,20 @@ class WebTests(unittest.TestCase):
         self.assertTrue(task["config"]["codex_runner_active"])
         self.assertEqual(task["config"]["codex_runner_pid"], 43210)
 
+    def test_05_delete_task(self):
+        task = seed_task(self.env, status="stopped", title="Delete me")
+        attempt = seed_attempt(self.env, task)
+        status, payload = self.client.request(
+            "DELETE", f"/api/tasks/{task['id']}", csrf=self.csrf
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload["deleted"])
+        self.assertFalse((self.env.settings.tasks_dir / task["id"]).exists())
+        status, payload = self.client.request("GET", f"/api/tasks/{task['id']}")
+        self.assertEqual(status, 404)
+        remaining = self.env.db.query_one("SELECT id FROM attempts WHERE id=?", (attempt["id"],))
+        self.assertIsNone(remaining)
+
     def test_06_logout(self):
         status, payload = self.client.request("POST", "/api/auth/logout", {}, csrf=self.csrf)
         self.assertEqual(status, 200)

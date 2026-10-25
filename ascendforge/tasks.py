@@ -866,6 +866,109 @@ class TaskService:
                 )
         return self.get(task_id)
 
+    def delete(self, task_id: str, *, actor: str = "user") -> dict:
+        """彻底删除一个不再运行的任务及其本地文件。
+
+        运行中的任务、存在未决远端提交的任务拒绝删除；未知提交必须
+        先对账，避免删除后失去恢复/审计依据。磁盘清理失败会返回 warnings，
+        但数据库记录已经删除，任务不会再出现在列表里。
+        """
+        task = self.get(task_id)
+        if task["status"] == TASK_RUNNING:
+            raise TaskError("TASK_RUNNING", "任务仍在运行，请先暂停或停止再删除")
+        if (task.get("config") or {}).get("codex_runner_active"):
+            if task["status"] == TASK_PAUSED:
+                # 软暂停仍保留 runner/app-server；删除前先结束进程树。
+                task = self.stop(task_id, reason="delete")
+            else:
+                raise TaskError("TASK_RUNNING", "Codex runner 仍在运行，请先停止再删除")
+        unresolved = self.db.query_one(
+            "SELECT id, state FROM submissions WHERE task_id=? AND state IN ('unknown','submitting') LIMIT 1",
+            (task_id,),
+        )
+        if unresolved:
+            raise TaskError(
+                "TASK_HAS_UNRESOLVED_SUBMISSION",
+                "任务存在结果未知或发送中的提交，请先对账后再删除",
+                details={"submission_id": unresolved["id"], "state": unresolved["state"]},
+            )
+
+        counts: dict[str, int] = {}
+        with self.db.transaction() as conn:
+            attempts = conn.execute("SELECT id FROM attempts WHERE task_id=?", (task_id,)).fetchall()
+            attempt_ids = [row["id"] for row in attempts]
+            if attempt_ids:
+                marks = ",".join("?" for _ in attempt_ids)
+                counts["agent_messages"] = conn.execute(
+                    f"DELETE FROM agent_messages WHERE attempt_id IN ({marks})", attempt_ids
+                ).rowcount
+            for table in (
+                "events",
+                "evaluations",
+                "submissions",
+                "generators",
+                "model_calls",
+                "cli_runs",
+                "snapshots",
+                "experiments",
+                "attempts",
+                "task_messages",
+            ):
+                counts[table] = conn.execute(f"DELETE FROM {table} WHERE task_id=?", (task_id,)).rowcount
+            counts["idempotency"] = conn.execute(
+                "DELETE FROM idempotency WHERE path LIKE ?", (f"%{task_id}%",)
+            ).rowcount
+            counts["tasks"] = conn.execute("DELETE FROM tasks WHERE id=?", (task_id,)).rowcount
+            conn.execute(
+                "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+                (
+                    actor,
+                    "delete_task",
+                    task_id,
+                    canonical_json({"title": task.get("title"), "counts": counts}),
+                    now(),
+                ),
+            )
+        if not counts.get("tasks"):
+            raise TaskError("TASK_NOT_FOUND", "任务不存在")
+
+        warnings: list[str] = []
+        removed_files = 0
+        removed_bytes = 0
+        roots = [
+            self.settings.data_dir / "tasks" / task_id,
+            self.settings.data_dir / "cli_workspaces" / task_id,
+        ]
+        log_pattern = f"codex-{task_id}-*.log"
+        roots.extend(sorted((self.settings.logs_dir).glob(log_pattern)))
+        for path in roots:
+            if not path.exists():
+                continue
+            try:
+                if path.is_file():
+                    removed_files += 1
+                    removed_bytes += path.stat().st_size
+                    path.unlink()
+                else:
+                    for item in path.rglob("*"):
+                        if item.is_file():
+                            removed_files += 1
+                            removed_bytes += item.stat().st_size
+                    shutil.rmtree(path)
+            except Exception as exc:
+                warnings.append(f"{path}: {exc}")
+                log.warning("failed to remove task path %s: %s", path, exc)
+
+        return {
+            "deleted": True,
+            "task_id": task_id,
+            "title": task.get("title"),
+            "rows": counts,
+            "removed_files": removed_files,
+            "removed_bytes": removed_bytes,
+            "warnings": warnings,
+        }
+
     # -- worker/internal transitions -------------------------------------
     def _set_needs_login(self, task_id: str, message: str) -> None:
         task = self.db.query_one("SELECT status FROM tasks WHERE id=?", (task_id,))
