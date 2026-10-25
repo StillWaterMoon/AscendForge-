@@ -822,6 +822,7 @@ class Handler(BaseHTTPRequestHandler):
         return 200, {"task": task_detail}
 
     def h_task_detail(self, task_id: str, **_: Any):
+        self.app.tasks.reconcile_codex_runner(task_id)
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
@@ -1187,6 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def h_codex_run(self, task_id: str, session: dict | None = None, **_):
+        self.app.tasks.reconcile_codex_runner(task_id)
         task = self.app.tasks.get(task_id)
         if task["status"] not in ("running", "paused", "pending"):
             if task["status"] not in ("completed", "stopped"):

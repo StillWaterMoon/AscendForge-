@@ -159,6 +159,29 @@ def _uploaded_template(archive: Path, task_dir: Path) -> tuple[dict, str]:
     return {"files": files, "source": "upload"}, hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
+def _pid_alive(pid: object) -> bool:
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {value}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return str(value) in (result.stdout or "")
+        except Exception:
+            return False
+    try:
+        os.kill(value, 0)
+        return True
+    except OSError:
+        return False
+
+
 def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
     config = dict(CONFIG_DEFAULTS)
     if base:
@@ -249,6 +272,26 @@ class TaskService:
         task = self._decode(task)
         task["messages"] = self.messages(task_id, limit=50)
         return task
+
+    def reconcile_codex_runner(self, task_id: str) -> dict:
+        """清理已退出但配置仍标记 active 的 Codex runner。"""
+        task = self.get(task_id)
+        config = dict(task.get("config") or {})
+        if config.get("execution_mode") != "codex" or not config.get("codex_runner_active"):
+            return task
+        if _pid_alive(config.get("codex_runner_pid")):
+            return task
+        config["codex_runner_active"] = False
+        config.pop("codex_runner_pid", None)
+        config.pop("codex_runner_token", None)
+        config["codex_runner_status"] = "terminated"
+        config["codex_pause_requested"] = False
+        self.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        add_event(self.db, task_id, None, "codex_runner_orphaned", {})
+        return self.get(task_id)
 
     def messages(self, task_id: str, *, limit: int = 50) -> list[dict]:
         rows = self.db.query(
@@ -643,7 +686,11 @@ class TaskService:
         if task["status"] != TASK_RUNNING:
             raise TaskError("BAD_STATE", f"只有 running 任务可以暂停，当前为 {task['status']}")
         config = dict(task.get("config") or {})
-        if config.get("execution_mode") == "codex" and config.get("codex_runner_active"):
+        if (
+            config.get("execution_mode") == "codex"
+            and config.get("codex_runner_active")
+            and _pid_alive(config.get("codex_runner_pid"))
+        ):
             # Codex 暂停采用“软暂停”：保留 runner、app-server 和 thread，
             # 只让循环停止发起新 turn。恢复时在同一个进程/会话上继续。
             config["codex_pause_requested"] = True

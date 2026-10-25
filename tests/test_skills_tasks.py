@@ -87,7 +87,9 @@ class TaskStateTests(unittest.TestCase):
                 "codex_session_ref": "thread-keep",
             },
         )
-        with patch("ascendforge.tasks.subprocess.run") as run:
+        with patch("ascendforge.tasks.subprocess.run") as run, patch(
+            "ascendforge.tasks._pid_alive", return_value=True
+        ):
             self.env.tasks.pause(task["id"], "test")
             run.assert_not_called()
         refreshed = self.env.tasks.get(task["id"])
@@ -97,6 +99,22 @@ class TaskStateTests(unittest.TestCase):
         self.assertEqual(refreshed["config"]["codex_runner_status"], "paused")
         self.assertTrue(refreshed["config"]["codex_pause_requested"])
         # 软暂停不杀进程，会话和 pid 都保留。
+        self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
+
+    def test_reconcile_orphaned_codex_runner(self):
+        task = seed_task(
+            self.env,
+            status="running",
+            config={
+                "execution_mode": "codex",
+                "codex_runner_active": True,
+                "codex_runner_pid": 999999,
+                "codex_session_ref": "thread-keep",
+            },
+        )
+        refreshed = self.env.tasks.reconcile_codex_runner(task["id"])
+        self.assertFalse(refreshed["config"]["codex_runner_active"])
+        self.assertNotIn("codex_runner_pid", refreshed["config"])
         self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
 
     def test_config_validation(self):
