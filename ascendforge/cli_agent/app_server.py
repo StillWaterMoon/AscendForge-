@@ -35,6 +35,7 @@ class AppServerAdapter:
         on_event=None,
         on_tool_call=None,
         tools: list[dict] | None = None,
+        thread_name: str | None = None,
     ):
         probe = probe_codex()
         self.executable = executable or probe.get("executable") or "codex.cmd"
@@ -42,6 +43,7 @@ class AppServerAdapter:
         self.on_event = on_event
         self.on_tool_call = on_tool_call
         self.tools = tools or []
+        self.thread_name = thread_name or ""
         self.node = shutil.which("node") or "node"
         self.port = _free_port()
         self.server = subprocess.Popen(
@@ -125,6 +127,7 @@ class AppServerAdapter:
             f"cwd={workspace}",
             f"prompt_file={prompt_file}",
             f"thread={thread or ''}",
+            f"thread_name={self.thread_name}",
             f"tools_file={tools_file}",
             f"timeout_ms={int(self.timeout_sec * 1000)}",
         ]

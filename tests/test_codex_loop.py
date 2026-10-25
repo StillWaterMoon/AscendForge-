@@ -4,7 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ascendforge.codex_loop import CLI_TOOL_SPECS, run_codex_agent, run_codex_loop
+from ascendforge.codex_loop import (
+    CLI_TOOL_SPECS,
+    _codex_thread_name,
+    run_codex_agent,
+    run_codex_loop,
+)
 from ascendforge.experiments import read_snapshot
 
 from tests.helpers import make_env, seed_attempt, seed_task
@@ -56,6 +61,7 @@ class FakeAdapter:
 class CaptureAgentAdapter:
     def __init__(self, **kwargs):
         self.prompts = []
+        self.thread_name = kwargs.get("thread_name")
 
     def prepare_workspace(self, root, files, **kwargs):
         workspace = Path(root) / "workspace"
@@ -129,6 +135,14 @@ class CodexLoopTests(unittest.TestCase):
         runs = env.db.query("SELECT * FROM cli_runs WHERE task_id=?", (task["id"],))
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["backend"], "codex")
+
+    def test_codex_thread_name_uses_problem_name(self):
+        self.assertEqual(_codex_thread_name({"problem_title": "AddN"}), "AddN算子优化")
+        self.assertEqual(
+            _codex_thread_name({"problem_json": {"name": "CopySign"}}),
+            "CopySign算子优化",
+        )
+        self.assertEqual(_codex_thread_name({"title": "ADDN算子优化"}), "ADDN算子优化")
 
     def test_codex_exposes_exactly_three_platform_tools(self):
         self.assertEqual(

@@ -181,6 +181,22 @@ def _wait_submission(db: Database, scheduler: Scheduler, worker: Worker, submiss
     raise CodexLoopError(f"submission {submission_id} did not finish within {timeout_sec}s")
 
 
+def _codex_thread_name(task: dict) -> str:
+    """生成 Codex 会话名：题目名 + 算子优化。"""
+    problem = task.get("problem_json") if isinstance(task.get("problem_json"), dict) else {}
+    name = (
+        task.get("problem_title")
+        or problem.get("name")
+        or problem.get("title")
+        or task.get("title")
+        or "算子"
+    )
+    name = str(name).strip()
+    if name.endswith("算子优化"):
+        return name[:120]
+    return f"{name}算子优化"[:120]
+
+
 def _submission_summary(
     db: Database,
     submission: dict,
@@ -528,6 +544,7 @@ def run_codex_agent(
             on_event=on_event,
             on_tool_call=tool_handler,
             tools=CLI_TOOL_SPECS,
+            thread_name=_codex_thread_name(task),
         )
         if not workspace.exists():
             workspace = adapter.prepare_workspace(

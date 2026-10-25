@@ -13,6 +13,7 @@ const prompt = promptFile
   ? fs.readFileSync(promptFile, "utf8")
   : (args.prompt || "");
 const threadId = args.thread || "";
+const threadName = args.thread_name || "";
 const model = args.model || "";
 const toolsFile = args.tools_file || "";
 const readline = await import("node:readline");
@@ -78,6 +79,10 @@ ws.onmessage = (event) => {
   if (obj.id === 2 && obj.result && obj.result.thread) {
     activeThread = obj.result.thread.id;
     emit({ type: "thread.started", thread_id: activeThread, source: obj.result.thread.source || null });
+    // 会话名称：题目名 + 算子优化，例如 AddN算子优化。
+    if (threadName) {
+      send(4, "thread/name/set", { threadId: activeThread, name: threadName });
+    }
     startTurn();
     return;
   }

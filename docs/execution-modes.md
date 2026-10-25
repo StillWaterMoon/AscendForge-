@@ -14,6 +14,7 @@
 
 - 使用本机已登录的 Codex CLI
 - 每个任务一个 Codex app-server thread
+- 会话名自动设为“题目名+算子优化”，例如 `AddN算子优化`
 - 创建任务后自动启动 Codex 会话
 - 可选上传项目模板 ZIP：
   - 上传：Codex 从该工程开始
