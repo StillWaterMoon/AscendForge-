@@ -608,23 +608,24 @@ class TaskService:
             return
         config = json_loads(task.get("config_json"), {})
         pid = config.get("codex_runner_pid")
-        if not pid:
-            return
-        try:
-            pid = int(pid)
-            if os.name == "nt":
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-            else:
-                os.killpg(pid, 15)
-        except Exception as exc:
-            log.warning("failed to terminate Codex runner %s: %s", pid, exc)
+        if pid:
+            try:
+                pid = int(pid)
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                else:
+                    os.killpg(pid, 15)
+            except Exception as exc:
+                log.warning("failed to terminate Codex runner %s: %s", pid, exc)
+        # 关键：暂停/停止只结束进程，不清理 codex_session_ref。
+        # 否则恢复时会新建一个会话，看起来像“没有接着之前的会话”。
         config.pop("codex_runner_pid", None)
-        config.pop("codex_session_ref", None)
+        config.pop("codex_runner_token", None)
         config["codex_runner_active"] = False
         config["codex_runner_status"] = "terminated"
         self.db.execute(

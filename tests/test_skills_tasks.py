@@ -76,11 +76,16 @@ class TaskStateTests(unittest.TestCase):
         attempt_row = self.env.db.query_one("SELECT status FROM attempts WHERE id=?", (attempt["id"],))
         self.assertEqual(attempt_row["status"], "failed")
 
-    def test_pause_terminates_codex_runner_and_clears_pid(self):
+    def test_pause_terminates_codex_runner_but_keeps_session(self):
         task = seed_task(
             self.env,
             status="running",
-            config={"execution_mode": "codex", "codex_runner_pid": 4242, "codex_runner_active": True},
+            config={
+                "execution_mode": "codex",
+                "codex_runner_pid": 4242,
+                "codex_runner_active": True,
+                "codex_session_ref": "thread-keep",
+            },
         )
         with patch("ascendforge.tasks.subprocess.run") as run:
             self.env.tasks.pause(task["id"], "test")
@@ -90,6 +95,8 @@ class TaskStateTests(unittest.TestCase):
         self.assertFalse(refreshed["config"]["codex_runner_active"])
         self.assertNotIn("codex_runner_pid", refreshed["config"])
         self.assertEqual(refreshed["config"]["codex_runner_status"], "terminated")
+        # 暂停只杀进程，会话引用必须保留，恢复时才能接着原 thread。
+        self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
 
     def test_config_validation(self):
         with self.assertRaises(TaskError):

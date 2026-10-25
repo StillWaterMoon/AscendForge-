@@ -12,6 +12,7 @@ database.  The worker is still the only sender of official submissions.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -253,6 +254,7 @@ def run_codex_agent(
         {
             "execution_mode": "codex",
             "codex_runner_active": True,
+            "codex_runner_pid": os.getpid(),
             "codex_runner_token": token,
             "codex_runner_status": "running",
         }

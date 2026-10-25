@@ -732,7 +732,7 @@ async function renderTask(taskId) {
         ${task.status === 'running' ? '<button class="btn" data-task-action="pause" title="暂停：停止新的模型调用和调度；排队提交保留，可恢复">暂停</button>' : ''}
         ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume" title="恢复：继续模型调用和排队提交">恢复</button>' : ''}
         ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop" title="停止：取消尚未发送的排队提交；远端已接受的提交不能撤回">停止</button>' : ''}
-        ${['completed', 'stopped'].includes(task.status) && task.model_configured ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
+        ${['completed', 'stopped'].includes(task.status) && task.model_configured && task.config?.execution_mode !== 'codex' ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
         ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
         <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
         ${['pending', 'paused', 'running', 'completed', 'stopped'].includes(task.status) && !task.config?.codex_runner_active ? '<button class="btn" data-codex-run="1" type="button" title="本地 Codex CLI 编辑工作区，宿主保存快照并提交评测">Codex 运行</button>' : ''}

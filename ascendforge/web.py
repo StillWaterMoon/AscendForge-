@@ -903,6 +903,8 @@ class Handler(BaseHTTPRequestHandler):
         task = self.app.tasks.get(task_id)
         if task["status"] not in ("completed", "stopped"):
             raise ApiError(409, "BAD_STATE", "只有已停止或已结束的任务可以继续优化")
+        if (task.get("config") or {}).get("execution_mode") == "codex":
+            raise ApiError(400, "USE_CODEX_RUN", "Codex 任务请点击“Codex 运行”恢复原会话")
         if not self.app.credentials.has("model"):
             raise ApiError(409, "MODEL_NOT_CONFIGURED", "请先在“模型与设置”中配置模型 API")
         previous_status = task["status"]
