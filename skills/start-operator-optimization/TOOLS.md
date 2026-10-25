@@ -1,120 +1,178 @@
-# 本地 Codex 算子优化：三工具合同
+# Codex 三工具
 
-版本：2.0；日期：2026-10-25。配合 SKILL.md 使用，替代旧六工具方案。
+版本：2.1；日期：2026-10-25。
 
-## 1. 范围与实现状态
+本文件只说明 Codex 当前实际可用的三个工具。工具通过 AscendForge 的
+Codex app-server dynamic tools 注册，schema 以实际注册为准。
 
-仅保留 read_problem(url)、submit_official(...)、read_official_evaluation(submission_id)。用户上传模板 ZIP，宿主解包进 workspace，Codex 使用自身文件能力编辑。无模板但接口充分时从零实现。
+## 范围
 
-根据当前实现报告，三个工具已通过 app-server dynamic tools 接通；MCP 尚未注册进 Codex，普通客户端聊天调用尚未完成。替换 skill 不以 MCP 部署为前提。以后提供 MCP 时复用同一业务逻辑与工具语义。
+- Codex 使用自己的文件工具读取和修改 workspace。
+- 宿主绑定任务、workspace、官方账号和提交白名单，Codex 不能切换。
+- 不提供读取模板、服务器测试、代码编辑或结果分页工具。
+- 只有下面三个工具。
 
-本文未检查项目源码。工具名和现有链路依据用户提供的报告；下文建议字段、复测与恢复行为是开发验收要求，不表示已经实现。尤其 submit_official 的完整 schema 未提供，开发时先核对现有定义，模型始终遵循实际注册参数。
+## 1. `read_problem`
 
-不提供服务器测试、模板远程读取、上下文管理和代码编辑工具。Codex 决定优化方向，宿主负责快照、官方连接、限频、幂等和结果归档。
+读取官方题目完整 Markdown 题面。
 
-## 2. 启动信息与真实 skill 注入
+### 输入
 
-宿主首次启动提供：题目 URL、workspace 实际路径、上传模板位置或无模板说明、提交文件白名单、只读文件说明、已知评分目标。恢复任务时补充已有本地笔记、快照位置与未决 submission_id。
+```json
+{
+  "url": "https://cannjudge.cn/..."
+}
+```
 
-用真实 SKILL.md 替换 HELLO 占位：可将正文注入首次消息，也可给出可访问的绝对路径并明确要求先阅读；必须从会话记录确认已注入或已读。TOOLS.md 放在同目录供首次阅读。仅放文件不代表完成注入，Markdown 也不代替实际注册的工具 description 和 JSON Schema。
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `url` | string | 是 | 当前题目的官方 URL |
 
-正常延续同一 thread，不在每次提交后新建空会话。skill 不负责修复宿主调度：恢复须确认实际 turn 启动，只有进程和 thread 引用不等于正在执行。resume 卡住时报告故障、保留现场；fallback 新会话必须带入工作区记录和未决提交，不能静默从零开始。
+### 返回
 
-## 3. read_problem(url)
+完整题面 Markdown 字符串，不截断、不摘要。
 
-用途：读取指定官方题目完整 Markdown 题面。
+### 失败
 
-输入：url，必填字符串，为当前任务的官方题目 URL。
+URL 无法解析、题目不存在或页面没有题面时，工具返回错误；不会把登录页
+当作题面。
 
-最小输出：完整题面 Markdown。现有实现返回字符串可保持；使用结构化响应时建议包含 url、title、markdown、problem_version（未知为 null）。实际响应与注册 schema 保持一致。
+## 2. `submit_official`
 
-要求：
+冻结当前 workspace 的允许源码，创建 attempt 和不可变快照，通过宿主的
+Scheduler 排队官方提交，立即返回 `submission_id`。
 
-- 保留语义、接口、dtype/shape、精度、限制和评分说明，不只返回摘要。
-- 不负责下载模板，不伪造题目没有提供的信息。
-- 只允许支持的官方站点和题目路径，不作为任意内网读取入口。
-- 获取失败明确报错，不将登录页面当题面。读取其他 URL 不得悄悄切换当前任务提交目标。
+### 输入
 
-建议 description：读取官方题目的完整 Markdown 题面；模板由用户上传至本地 workspace，本工具不读取模板。
+```json
+{
+  "request_id": "可选幂等键",
+  "hypothesis": "可选猜想",
+  "parent_attempt_id": "可选父 attempt"
+}
+```
 
-## 4. submit_official(...)
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `request_id` | string | 否 | 幂等键；同一值重试返回原 submission |
+| `hypothesis` | string | 否 | 本轮猜想，写入 attempt |
+| `parent_attempt_id` | string | 否 | 指定父 attempt；默认当前工作版本 |
 
-用途：宿主读取绑定 workspace 的允许源码、冻结快照、创建 attempt，经 Scheduler 排队官方提交。
+### 行为
 
-参数以当前注册 schema 为准。题目、workspace 和账号由宿主绑定，不让模型通过任意路径或账号参数覆盖。不再要求传入 files[].content。
+```text
+读取 workspace 允许的源码
+→ 校验源码变化和 preflight
+→ 创建 attempt
+→ 保存不可变快照
+→ 排队官方提交
+→ 返回 submission_id
+```
 
-如现有 schema 缺失以下能力，建议在同一工具内补充可选参数：
+只提交用户模板中标记为可编辑的文件。`main.asc`、`CMakeLists.txt`、
+`run.sh` 等只读文件不进入官方载荷。
 
-| 建议参数 | 用途 |
-| --- | --- |
-| request_id | 幂等重试标识；也可由宿主管理可恢复的调用标识 |
-| intent：candidate / retest | 默认 candidate，retest 表示相同源码的独立复测 |
-| hypothesis | 可选的简短猜想或复测理由，用于审计 |
+不会等待远端评测完成。
 
-以上为扩展建议，不在未注册前要求模型使用。没有复测入口时明确报告，不允许通过改注释绕过源码检查。
+### 返回
 
-宿主顺序：
+```json
+{
+  "submission_id": "sub_xxx",
+  "attempt_id": "att_xxx",
+  "snapshot_id": "snap_xxx",
+  "source_sha256": "abc...",
+  "state": "queued",
+  "remote_id": null,
+  "reused": false,
+  "submitted": true,
+  "note": "accepted/queued only; poll read_official_evaluation"
+}
+```
 
-1. 检查任务未暂停/停止，确认题目及提交白名单。
-2. 读取允许的文件，拒绝越界和符号链接逃逸，校验必需文件。main.asc、其他草稿、备份和笔记不自动加入载荷。
-3. 一致地冻结源码、校验实际变化、生成快照及每文件哈希。之后只提交快照，不重读可变 workspace。
-4. 原子关联请求、attempt、snapshot 和 submission，持久化后入队，保证崩溃恢复不重复提交。
-5. 返回本平台 submission_id，不等待官方评测完成。
+`submitted=true` 只表示已接收/已排队，不代表编译或正确性通过。
 
-最小响应为 submission_id 和接收/排队状态。建议返回 snapshot_id、source_sha256、file_hashes、poll_after_seconds；remote_id 尚未取得时为 null。
+当前版本不支持同源码复测；没有有效源码变化时提交会失败。
 
-幂等与复测：
+## 3. `read_official_evaluation`
 
-- 普通候选无变化或只有注释变化时可拒绝；显式复测必须允许相同源码。
-- 独立复测必须产生新的真实官方执行，历史结果复用不叫复测。
-- 同一幂等请求返回原 submission；同一标识绑定不同源码应报冲突。
-- 响应丢失由宿主按原请求/调用记录恢复 submission_id；当前只有 submission_id 查询，不要求模型调用不存在的 request_id 查询工具。
-- 是否已被官方接收不明确时先对账并标记未知，不盲目重发。
+按本平台 `submission_id` 查询官方评测。
 
-建议 description：提交当前 workspace 的允许源码到官方 OJ；宿主冻结快照并限频排队。返回 submission_id 后使用 read_official_evaluation 查询；接收成功不表示编译或正确性通过。
+### 输入
 
-## 5. read_official_evaluation(submission_id)
+```json
+{
+  "submission_id": "sub_xxx"
+}
+```
 
-用途：读取该提交的状态、真实结果和诊断。
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `submission_id` | string | 是 | `submit_official` 返回的本平台 ID，不是 `remote_id` |
 
-输入：submission_id，来自 submit_official 的本平台 ID，不是 remote_id。
+### 返回
 
-保留现有 state、remote_id、compile、correctness、performance、score、testcases。建议补齐以下信息，可嵌入现有对象：
+```json
+{
+  "submission_id": "sub_xxx",
+  "attempt_id": "att_xxx",
+  "snapshot_id": "snap_xxx",
+  "source_sha256": "abc...",
+  "state": "queued",
+  "remote_id": null,
+  "error_code": null,
+  "error_message": null,
+  "sent_at": null,
+  "poll_count": 0,
+  "normalized": {},
+  "compile": null,
+  "correctness": null,
+  "performance": null,
+  "score": null,
+  "testcases": [],
+  "official": true
+}
+```
 
-| 信息 | 要求 |
-| --- | --- |
-| 提交关联 | submission_id、snapshot_id/source_sha256，不串用其他 attempt 结果 |
-| 进度 | 状态、是否终态、建议轮询间隔；区分排队、运行、完成与外部失败 |
-| 编译诊断 | 实际错误正文与文件/行号，不仅是 COMPILE_ERROR |
-| 正确性 | 官方 verdict、已知预期/完成/通过数量、完整覆盖及其依据 |
-| 性能 | 官方实际返回的逐点耗时、聚合值与单位，未知为 null |
-| 评分 | 原始官方 score；本平台计算值另标公式与来源 |
-| 测试点 | 可用的 ID、状态、dtype/shape、误差，缺失不猜测 |
-| 外部故障 | 登录、网络、配额、发送不确定等原因，与代码失败区分 |
+`state`：
 
-长日志不能静默截断。当前只有一个查询参数时应返回完整关键诊断；可将完整日志保存为任务 workspace 内可读文件，并返回路径和截断说明。若需分页可后续扩展此工具可选参数，不新增第四工具。文件系统不共享时不能返回 Codex 无法读取的路径冒充日志可用。
+```text
+queued
+submitting
+submitted
+judging
+finished
+failed
+unknown
+```
 
-finished 表示流程完成，不等于 Pass。编译错误、WA 是有效评测结果，不是工具调用故障。所有已返回点通过不自动等于完整覆盖；分别记录官方 Pass 和本平台确认完整覆盖，未知数量或身份不得补造。
+`finished` 只表示流程结束，不等于 Pass。编译错误和 Wrong Answer 是有效
+评测结果，不是工具故障。
 
-性能缺失不使用 precision_ratio 代替。非终态按建议间隔查询，终态停止轮询。外部故障退避重试后仍持续时暂停并保存现场，避免空转。
+`source_sha256` 对应该次提交冻结的快照。后续修改 workspace 不会改变已
+返回的结果对应源码。
 
-建议 description：查询本平台 submission_id 对应的官方评测，返回状态或真实编译诊断、正确性、性能、评分和测试点结果。按建议间隔等待终态，不使用 remote_id 作为参数。
+## 宿主边界
 
-## 6. 限频、资源与停止
+- Codex 不直接访问 CANNJudge 凭据。
+- 提交必须经过宿主 Scheduler，保留提交限频、在途限制、幂等和 unknown
+  对账。
+- Codex 暂停/停止后不再发起新提交。
+- 已提交的官方评测仍可用 `read_official_evaluation` 查询。
 
-保留提交间隔、在途限制、幂等、单次操作超时和外部真实配额。不设置人为累计提交次数、token、费用、固定修订数或连续无提升停止预算。实现报告中的“额度”需核对：外部真实额度保留，人为任务累计预算按本要求取消。
+## 启动信息
 
-用户停止后不发送尚未发出的排队任务，保存代码、记录和在途 ID。已经被官方接收的任务仍可归档结果，不把进程终止描述成取消了远端提交。
+首次会话会提供：
 
-## 7. 最小验收
+```text
+任务 ID
+workspace 绝对路径
+题目 URL
+上传模板位置，或“空项目”说明
+允许提交的文件
+只读文件
+评分指标和目标
+```
 
-1. 启动记录证明真实 skill 已注入或已读取，三个工具名称和 schema 一致。
-2. 用户模板通过本地文件工具读取；无模板且接口充分时从零实现，接口不足时明确阻塞。
-3. 快照与实际载荷一致；main.asc、备份和笔记未上传；排队后编辑不改变已提交内容。
-4. 编译错误有可操作的诊断，Codex 基于失败版本修复；WA 不覆盖已验证 best。
-5. submission_id 能查询真实 remote_id 和终态；排队不当成通过，轮询不产生新提交。
-6. 幂等重试不重复发送，同代码显式复测产生新远端记录；不支持复测时明确报错。
-7. 暂停、网络/额度错误及 resume 卡住不显示空壳 running，恢复能找到工作代码与未决评测。
-8. 分开报告单元测试、真实工具闭环和真实优化效果；测试数量和退出码 0 不证明代码正确或性能提高。
-
-本次优先替换占位 skill、补全反馈、保障源码与结果关联。在这条三工具链上观察优化表现；不要求立即完成 MCP 注册、普通客户端聊天或服务器测试后端。
+模板由用户上传，宿主解压进 workspace。Codex 用自身的文件工具读取和
+修改，不通过平台工具读取源码。
