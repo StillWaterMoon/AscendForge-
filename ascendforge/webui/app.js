@@ -13,6 +13,7 @@ const state = {
   route: '',
   taskId: null,
   taskTab: 'overview',
+  lockedToastTask: null,
   summary: null,
   platform: null,
   model: null,
@@ -741,6 +742,10 @@ async function renderTask(taskId) {
   ]);
   const task = data.task;
   state.task = task;
+  if (task.last_error_code === 'CODEX_THREAD_LOCKED' && state.lockedToastTask !== task.id) {
+    state.lockedToastTask = task.id;
+    toast('原会话正被另一个 Codex 进程占用；请关闭占用端会话后重试。原会话与工作区已保留。', 'error');
+  }
   const quota = task.quota || {};
   const config = task.config || {};
   const usage = task.usage || {};
