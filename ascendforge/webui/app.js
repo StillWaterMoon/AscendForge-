@@ -1122,6 +1122,9 @@ function taskTabButton(key, label) {
 }
 
 function renderTaskAlert(task, quota) {
+  if (task.last_error_code === 'CODEX_THREAD_LOCKED') {
+    return `<div class="alert warn" style="margin-bottom:16px">原会话正被另一个 Codex 进程占用，暂时无法恢复。请在占用端结束该会话的使用并释放占用后重试。原会话与工作区已保留。<div class="faint small" style="margin-top:6px">${esc(task.last_error || '')}</div></div>`;
+  }
   if (task.status === 'needs_login') {
     return `<div class="alert warn" style="margin-bottom:16px">CANNJudge 登录失效，新的模型调用/提交已暂停，已在途的结果仍会收集。请前往 <a href="#/platform">平台连接</a> 重新登录，然后恢复任务。${task.last_error ? `<div class="faint small" style="margin-top:6px">${esc(task.last_error)}</div>` : ''}</div>`;
   }

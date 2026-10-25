@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -87,6 +88,39 @@ class CaptureAgentAdapter:
         pass
 
 
+class LockedThreadAdapter:
+    def __init__(self, **kwargs):
+        self.closed = False
+
+    def prepare_workspace(self, root, files, **kwargs):
+        workspace = Path(root) / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
+
+    def resume(self, session_ref, prompt, *, workspace, output_file, model=None):
+        Path(output_file).write_text("", encoding="utf-8")
+        return SimpleNamespace(
+            session_ref=session_ref,
+            run_id="locked",
+            exit_code=2,
+            timed_out=False,
+            usage={},
+            last_message="",
+            stderr="",
+            error="thread already has an active writer",
+            error_code="CODEX_THREAD_LOCKED",
+            error_stage="thread_resume",
+            error_thread_id=session_ref,
+            diagnostics=[{"type": "bridge.transport_error"}],
+        )
+
+    def start(self, prompt, *, workspace, output_file, model=None, **kwargs):
+        raise AssertionError("must not create a new thread")
+
+    def close(self):
+        self.closed = True
+
+
 class FakeWorker:
     def __init__(self, env):
         self.env = env
@@ -103,6 +137,33 @@ class FakeWorker:
 
 
 class CodexLoopTests(unittest.TestCase):
+    def test_locked_thread_is_reported_without_new_thread(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-codex-locked-"))
+        env = make_env(tmp)
+        task = seed_task(
+            env,
+            status="running",
+            title="Locked thread",
+            config={"execution_mode": "codex", "codex_session_ref": "thread-locked"},
+        )
+        adapter = LockedThreadAdapter()
+        with patch("ascendforge.codex_loop.AppServerAdapter", return_value=adapter):
+            result = run_codex_agent(env.settings, task["id"], timeout_sec=10)
+        refreshed = env.tasks.get(task["id"])
+        self.assertEqual(refreshed["status"], "paused")
+        self.assertEqual(refreshed["last_error_code"], "CODEX_THREAD_LOCKED")
+        self.assertIn("active writer", refreshed["last_error"])
+        self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-locked")
+        event = env.db.query_one(
+            "SELECT payload_json FROM events WHERE task_id=? AND type='codex_resume_failed'",
+            (task["id"],),
+        )
+        payload = json.loads(event["payload_json"])
+        self.assertEqual(payload["code"], "CODEX_THREAD_LOCKED")
+        self.assertEqual(payload["stage"], "thread_resume")
+        self.assertEqual(payload["thread_id"], "thread-locked")
+        self.assertEqual(result["session_ref"], "thread-locked")
+
     def test_codex_loop_saves_real_snapshot_and_waits_for_evaluation(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-loop-"))
         env = make_env(tmp)

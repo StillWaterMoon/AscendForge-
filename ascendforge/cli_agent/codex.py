@@ -36,6 +36,11 @@ class CodexRunResult:
     duration_sec: float = 0.0
     timed_out: bool = False
     error: str | None = None
+    error_code: str | None = None
+    error_stage: str | None = None
+    error_thread_id: str | None = None
+    error_request_id: str | None = None
+    diagnostics: list[dict] = field(default_factory=list)
 
 
 def parse_jsonl(text: str) -> list[CliEvent]:

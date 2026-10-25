@@ -24,13 +24,40 @@ const dynamicTools = toolsFile && fs.existsSync(toolsFile)
 const pendingTools = new Map();
 let threadStartTimer = null;
 let turnStartTimer = null;
+let fatalError = null;
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 function fail(message) {
-  emit({ type: "bridge.error", message: String(message || "unknown") });
+  if (fatalError) {
+    emit({ type: "bridge.transport_error", message: String(message || "unknown"), after: fatalError.code });
+    return;
+  }
+  emit({ type: "bridge.error", fatal: true, message: String(message || "unknown") });
   process.exit(2);
+}
+
+function clearStartTimers() {
+  if (threadStartTimer) clearTimeout(threadStartTimer);
+  if (turnStartTimer) clearTimeout(turnStartTimer);
+  threadStartTimer = null;
+  turnStartTimer = null;
+}
+
+function failRpc(obj, stage) {
+  const rawError = obj.error;
+  const code = rawError && typeof rawError === "object" ? rawError.code : null;
+  const message = rawError && typeof rawError === "object"
+    ? String(rawError.message || JSON.stringify(rawError))
+    : String(rawError || obj.message || "request failed");
+  fatalError = { code, message, stage, request_id: obj.id, thread_id: activeThread };
+  clearStartTimers();
+  // Emit the first real failure and stop this request immediately. Do not wait
+  // for thread_start_timeout or let a later websocket close overwrite it.
+  emit({ type: "bridge.rpc_error", fatal: true, ...fatalError });
+  try { ws.close(); } catch (_) {}
+  setTimeout(() => process.exit(2), 50);
 }
 
 const ws = new WebSocket(`ws://127.0.0.1:${port}`);
@@ -90,6 +117,18 @@ ws.onmessage = (event) => {
     }, 30000);
     return;
   }
+  if (obj.error && obj.id != null) {
+    const stage = obj.id === 2
+      ? (threadId ? "thread_resume" : "thread_start")
+      : obj.id === 3 ? "turn_start" : "request";
+    if (obj.id === 4) {
+      // 会话命名失败不是致命错误；继续执行 turn。
+      emit({ type: "bridge.notice", stage: "thread_name_set", error: obj.error });
+      return;
+    }
+    failRpc(obj, stage);
+    return;
+  }
   if (obj.id === 2 && obj.result && obj.result.thread) {
     if (threadStartTimer) clearTimeout(threadStartTimer);
     threadStartTimer = null;
@@ -143,7 +182,8 @@ ws.onmessage = (event) => {
     return;
   }
   if (obj.method === "error" || obj.error) {
-    emit({ type: "bridge.error", error: obj.error || obj.params || obj });
+    // 无 id 的通知只记录诊断，不能当成整个 turn 的致命错误。
+    emit({ type: "bridge.error", fatal: false, error: obj.error || obj.params || obj });
   }
 };
 
@@ -166,5 +206,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
 ws.onerror = () => fail("websocket connection failed");
 ws.onclose = () => {
-  if (!completed) fail("websocket closed before turn completed");
+  if (fatalError || completed) return;
+  fail("websocket closed before turn completed");
 };

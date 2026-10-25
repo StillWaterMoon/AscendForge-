@@ -230,22 +230,67 @@ class AppServerAdapter:
         text = ""
         usage = {}
         error = None
+        error_code = None
+        error_stage = None
+        error_thread = thread
+        error_request_id = None
+        diagnostics: list[dict] = []
         for event in events:
             if event.type == "thread.started":
                 thread_id = str(event.raw.get("thread_id") or thread_id or "")
+                error_thread = thread_id
             elif event.type == "turn.completed":
                 thread_id = str(event.raw.get("thread_id") or thread_id or "")
                 text = str(event.raw.get("text") or "")
                 usage = event.raw.get("usage") or {}
-            elif event.type in (
-                "bridge.error",
-                "bridge.timeout",
-                "bridge.thread_start_timeout",
-                "bridge.turn_start_timeout",
-            ):
-                error = str(event.raw.get("message") or event.raw.get("error") or event.type)
-        if timed_out:
+            elif event.type == "bridge.rpc_error":
+                detail = {
+                    "code": event.raw.get("code"),
+                    "message": event.raw.get("message"),
+                    "stage": event.raw.get("stage"),
+                    "thread_id": event.raw.get("thread_id"),
+                    "request_id": event.raw.get("request_id"),
+                    "fatal": True,
+                }
+                if error is None:
+                    error = str(detail["message"] or "Codex request failed")
+                    error_stage = str(detail["stage"] or "")
+                    error_thread = str(detail["thread_id"] or error_thread or "")
+                    error_request_id = str(detail["request_id"] or "") or None
+                    raw_code = detail["code"]
+                    if "already has an active writer" in error.lower():
+                        error_code = "CODEX_THREAD_LOCKED"
+                    elif raw_code is not None:
+                        error_code = f"CODEX_RPC_{raw_code}"
+                    else:
+                        error_code = "CODEX_RPC_ERROR"
+                else:
+                    diagnostics.append(detail)
+            elif event.type in ("bridge.thread_start_timeout", "bridge.turn_start_timeout"):
+                detail = {"type": event.type, "thread_id": event.raw.get("thread_id")}
+                if error is None:
+                    error = event.type
+                    error_code = "CODEX_TIMEOUT"
+                    error_stage = "thread_start" if "thread" in event.type else "turn_start"
+                    error_thread = str(event.raw.get("thread_id") or error_thread or "")
+                else:
+                    diagnostics.append(detail)
+            elif event.type == "bridge.error":
+                detail = {
+                    "message": event.raw.get("message") or event.raw.get("error"),
+                    "fatal": bool(event.raw.get("fatal")),
+                }
+                if error is None and detail["fatal"]:
+                    error = str(detail["message"] or "bridge error")
+                    error_code = "CODEX_BRIDGE_ERROR"
+                else:
+                    diagnostics.append(detail)
+            elif event.type in ("bridge.timeout", "bridge.transport_error", "bridge.notice"):
+                diagnostics.append({"type": event.type, "raw": event.raw})
+        if timed_out and error is None:
             error = "timeout"
+            error_code = "CODEX_TIMEOUT"
+            error_stage = "turn"
         if not text:
             for event in reversed(events):
                 if event.type == "turn.completed":
@@ -263,6 +308,11 @@ class AppServerAdapter:
             duration_sec=time.monotonic() - started,
             timed_out=timed_out,
             error=error,
+            error_code=error_code,
+            error_stage=error_stage,
+            error_thread_id=error_thread,
+            error_request_id=error_request_id,
+            diagnostics=diagnostics,
         )
 
     def _turn(self, prompt: str, workspace: Path, thread: str | None, output_file: Path) -> CodexRunResult:

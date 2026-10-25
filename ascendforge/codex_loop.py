@@ -680,6 +680,8 @@ def run_codex_agent(
             + (prompt or "")
         )
         turns = 0
+        turn_error_code: str | None = None
+        turn_error_stage: str | None = None
         while True:
             current = tasks.get(task_id)
             current_config = current.get("config") or {}
@@ -708,14 +710,21 @@ def run_codex_agent(
                     session_ref, instruction, workspace=workspace, output_file=workspace_root / "last.txt"
                 )
                 if result.error:
-                    # 不自动新建 thread 掩盖恢复失败；保留原 thread 和错误，
-                    # 由用户决定下一步。
+                    # 不自动新建 thread 掩盖恢复失败；保留首个结构化错误，
+                    # 后续超时/连接关闭只作为 diagnostics。
                     add_event(
                         db,
                         task_id,
                         None,
                         "codex_resume_failed",
-                        {"thread_id": session_ref, "error": result.error},
+                        {
+                            "thread_id": getattr(result, "error_thread_id", None) or session_ref,
+                            "error": result.error,
+                            "code": getattr(result, "error_code", None),
+                            "stage": getattr(result, "error_stage", None),
+                            "request_id": getattr(result, "error_request_id", None),
+                            "diagnostics": getattr(result, "diagnostics", []),
+                        },
                     )
             else:
                 phase("starting_session")
@@ -750,12 +759,19 @@ def run_codex_agent(
             # 会以 result.error 返回，但进程退出码仍可能是 0。
             if result.error or result.timed_out or result.exit_code not in (0, None):
                 turn_error = str(result.error or ("timeout" if result.timed_out else "codex exited non-zero"))
+                turn_error_code = getattr(result, "error_code", None) or "CODEX_ERROR"
+                turn_error_stage = getattr(result, "error_stage", None)
                 add_event(
                     db,
                     task_id,
                     None,
                     "codex_turn_failed",
-                    {"error": turn_error, "stderr": result.stderr[-1000:]},
+                    {
+                        "error": turn_error,
+                        "code": turn_error_code,
+                        "stage": turn_error_stage,
+                        "stderr": result.stderr[-1000:],
+                    },
                 )
                 break
             history.append({"turn": turns, "thread": session_ref, "last": result.last_message[:1000]})
@@ -796,15 +812,19 @@ def run_codex_agent(
                 # 却没有 runner。暂停后用户可以充值并手动恢复同一会话。
                 tasks.pause(task_id, reason=f"codex_error: {turn_error[:300]}")
                 db.execute(
-                    "UPDATE tasks SET last_error_code='CODEX_ERROR', last_error=?, updated_at=? WHERE id=?",
-                    (turn_error[:2000], now(), task_id),
+                    "UPDATE tasks SET last_error_code=?, last_error=?, updated_at=? WHERE id=?",
+                    (turn_error_code or "CODEX_ERROR", turn_error[:2000], now(), task_id),
                 )
                 add_event(
                     db,
                     task_id,
                     None,
                     "codex_session_paused_on_error",
-                    {"error": turn_error[:1000]},
+                    {
+                        "error": turn_error[:1000],
+                        "code": turn_error_code or "CODEX_ERROR",
+                        "stage": turn_error_stage,
+                    },
                 )
             # 正常结束/用户暂停不自动暂停；真实错误才落为 paused。
         except Exception:
