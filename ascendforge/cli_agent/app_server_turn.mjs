@@ -22,6 +22,8 @@ const dynamicTools = toolsFile && fs.existsSync(toolsFile)
   ? JSON.parse(fs.readFileSync(toolsFile, "utf8"))
   : [];
 const pendingTools = new Map();
+let threadStartTimer = null;
+let turnStartTimer = null;
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
@@ -56,6 +58,13 @@ function startTurn() {
   };
   if (model) params.model = model;
   send(3, "turn/start", params);
+  // 恢复旧 thread 时 app-server 可能不返回 turn；30 秒内没有
+  // turn.started/响应就交给 Python 做“新 thread”回退。
+  turnStartTimer = setTimeout(() => {
+    emit({ type: "bridge.turn_start_timeout", thread_id: activeThread });
+    try { ws.close(); } catch (_) {}
+    setTimeout(() => process.exit(4), 50);
+  }, 30000);
 }
 
 ws.onopen = () => {
@@ -74,9 +83,16 @@ ws.onmessage = (event) => {
     } else {
       send(2, "thread/start", { cwd, dynamicTools });
     }
+    threadStartTimer = setTimeout(() => {
+      emit({ type: "bridge.thread_start_timeout", thread_id: activeThread });
+      try { ws.close(); } catch (_) {}
+      setTimeout(() => process.exit(4), 50);
+    }, 30000);
     return;
   }
   if (obj.id === 2 && obj.result && obj.result.thread) {
+    if (threadStartTimer) clearTimeout(threadStartTimer);
+    threadStartTimer = null;
     activeThread = obj.result.thread.id;
     emit({ type: "thread.started", thread_id: activeThread, source: obj.result.thread.source || null });
     // 会话名称：题目名 + 算子优化，例如 AddN算子优化。
@@ -87,6 +103,8 @@ ws.onmessage = (event) => {
     return;
   }
   if (obj.id === 3 && obj.result && obj.result.turn) {
+    if (turnStartTimer) clearTimeout(turnStartTimer);
+    turnStartTimer = null;
     emit({ type: "turn.started", turn_id: obj.result.turn.id });
     return;
   }

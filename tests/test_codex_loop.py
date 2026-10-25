@@ -7,6 +7,7 @@ from unittest.mock import patch
 from ascendforge.codex_loop import (
     CLI_TOOL_SPECS,
     _codex_thread_name,
+    _recover_codex_session_ref,
     run_codex_agent,
     run_codex_loop,
 )
@@ -135,6 +136,16 @@ class CodexLoopTests(unittest.TestCase):
         runs = env.db.query("SELECT * FROM cli_runs WHERE task_id=?", (task["id"],))
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["backend"], "codex")
+
+    def test_recover_session_ref_from_old_event(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-codex-recover-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="stopped", config={"execution_mode": "codex"})
+        env.db.execute(
+            "INSERT INTO events(task_id, attempt_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (task["id"], None, "codex_thread_started", '{"thread_id":"old-thread"}', 1.0),
+        )
+        self.assertEqual(_recover_codex_session_ref(env.db, task["id"]), "old-thread")
 
     def test_codex_thread_name_uses_problem_name(self):
         self.assertEqual(_codex_thread_name({"problem_title": "AddN"}), "AddN算子优化")

@@ -203,7 +203,12 @@ class AppServerAdapter:
                 thread_id = str(event.raw.get("thread_id") or thread_id or "")
                 text = str(event.raw.get("text") or "")
                 usage = event.raw.get("usage") or {}
-            elif event.type in ("bridge.error", "bridge.timeout"):
+            elif event.type in (
+                "bridge.error",
+                "bridge.timeout",
+                "bridge.thread_start_timeout",
+                "bridge.turn_start_timeout",
+            ):
                 error = str(event.raw.get("message") or event.raw.get("error") or event.type)
         if timed_out:
             error = "timeout"

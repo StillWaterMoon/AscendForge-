@@ -182,6 +182,20 @@ def _wait_submission(db: Database, scheduler: Scheduler, worker: Worker, submiss
     raise CodexLoopError(f"submission {submission_id} did not finish within {timeout_sec}s")
 
 
+def _recover_codex_session_ref(db: Database, task_id: str) -> str | None:
+    """从事件记录恢复被旧版本清空的 Codex thread 引用。"""
+    row = db.query_one(
+        "SELECT payload_json FROM events WHERE task_id=? AND type='codex_thread_started' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (task_id,),
+    )
+    if not row:
+        return None
+    payload = json_loads(row.get("payload_json"), {})
+    value = payload.get("thread_id") if isinstance(payload, dict) else None
+    return str(value) if value else None
+
+
 def _codex_thread_name(task: dict) -> str:
     """生成 Codex 会话名：题目名 + 算子优化。"""
     problem = task.get("problem_json") if isinstance(task.get("problem_json"), dict) else {}
@@ -272,6 +286,17 @@ def run_codex_agent(
         # until after the app-server is available.
         pass
     session_ref: str | None = config.get("codex_session_ref")
+    if not session_ref:
+        # 兼容旧版本暂停时误删 session_ref 的任务：事件里仍然保存着
+        # thread_id，恢复它以便继续原对话。
+        session_ref = _recover_codex_session_ref(db, task_id)
+        if session_ref:
+            config["codex_session_ref"] = session_ref
+            db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            add_event(db, task_id, None, "codex_session_recovered", {"thread_id": session_ref})
     state = {
         "parent_id": parent_id,
         "parent_files": dict(parent_files),
@@ -615,6 +640,26 @@ def run_codex_agent(
                 result = adapter.resume(
                     session_ref, instruction, workspace=workspace, output_file=workspace_root / "last.txt"
                 )
+                if result.error and any(
+                    marker in result.error.lower()
+                    for marker in ("start_timeout", "websocket", "connection")
+                ):
+                    # 旧 thread 可能因进程被杀/异常 turn 卡死。保留 workspace，
+                    # 用新的 thread 继续，避免任务显示 running 却永远不产生提交。
+                    add_event(
+                        db,
+                        task_id,
+                        None,
+                        "codex_resume_fallback",
+                        {"old_thread": session_ref, "error": result.error},
+                    )
+                    session_ref = None
+                    result = adapter.start(
+                        startup,
+                        workspace=workspace,
+                        output_file=workspace_root / "last.txt",
+                        sandbox="workspace-write",
+                    )
             else:
                 result = adapter.start(
                     instruction,

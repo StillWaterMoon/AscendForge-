@@ -727,17 +727,13 @@ async function renderTask(taskId) {
         <div class="muted small">${esc(task.problem_title || '')} <span class="mono">${esc(task.problem_id || '')}</span></div>
       </div>
       <div class="toolbar">
-        ${task.status === 'pending' ? '<button class="btn btn-primary" data-task-action="start">开始</button>' : ''}
-        ${(task.counts?.attempts || 0) === 0 && ['pending', 'running'].includes(task.status) ? '<button class="btn" data-baseline-submit="1" title="不依赖模型，直接提交一次模板基线">提交基线（手动）</button>' : ''}
-        ${task.status === 'running' ? '<button class="btn" data-task-action="pause" title="暂停：停止新的模型调用和调度；排队提交保留，可恢复">暂停</button>' : ''}
-        ${['paused', 'needs_login', 'needs_review'].includes(task.status) ? '<button class="btn btn-primary" data-task-action="resume" title="恢复：继续模型调用和排队提交">恢复</button>' : ''}
-        ${!isTerminal ? '<button class="btn btn-danger" data-task-action="stop" title="停止：取消尚未发送的排队提交；远端已接受的提交不能撤回">停止</button>' : ''}
-        ${['completed', 'stopped'].includes(task.status) && task.model_configured && task.config?.execution_mode !== 'codex' ? `<button class="btn btn-primary" data-continue-opt="1">${task.status === 'stopped' ? '继续优化' : '继续自动优化'}</button>` : ''}
-        ${task.best_attempt_id ? `<a class="btn" href="/api/tasks/${encodeURIComponent(task.id)}/download/best">下载最好代码</a>` : ''}
-        <a class="btn btn-ghost" href="/api/tasks/${encodeURIComponent(task.id)}/archive">导出档案</a>
-        ${['pending', 'paused', 'running', 'completed', 'stopped'].includes(task.status) && !task.config?.codex_runner_active ? '<button class="btn" data-codex-run="1" type="button" title="本地 Codex CLI 编辑工作区，宿主保存快照并提交评测">Codex 运行</button>' : ''}
-        <button class="btn btn-ghost" data-budget="1" type="button">调整提交上限</button>
-        <button class="btn btn-ghost" id="task-refresh" type="button">刷新</button>
+        ${(() => {
+          const codexActive = task.config?.execution_mode === 'codex' && task.config?.codex_runner_active;
+          const running = task.status === 'running' && (task.config?.execution_mode !== 'codex' || codexActive);
+          return running
+            ? '<button class="btn btn-primary" data-pause-task="1" type="button">暂停任务</button>'
+            : '<button class="btn btn-primary" data-continue-task="1" type="button">继续任务</button>';
+        })()}
       </div>
     </div>
 
@@ -749,7 +745,6 @@ async function renderTask(taskId) {
         <span class="strategy-strip-text" title="${esc(task.active_strategy?.text || '')}">${esc(task.active_strategy?.text || '等待第一条远端结果')}</span>
         <span class="strategy-owner">长期约束：${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 120)) : '未设置'}</span>
       </div>
-      <button class="btn btn-sm btn-ghost" data-message="1" type="button">给 Agent 留言</button>
     </div>
 
     ${task.config?.codex_runner_active ? `<div class="experiment-strip codex-run-strip">
@@ -771,7 +766,6 @@ async function renderTask(taskId) {
       <span>working <b class="mono">${esc(String(task.experiment.working_attempt_id || '—').slice(0, 12))}</b></span>
       <span>experiment best <b class="mono">${esc(String(task.experiment.experiment_best_id || '—').slice(0, 12))}</b></span>
       ${task.experiment.hypothesis ? `<span class="experiment-hypothesis" title="${esc(task.experiment.hypothesis)}">${esc(String(task.experiment.hypothesis).slice(0, 120))}</span>` : ''}
-      <button class="btn btn-sm btn-ghost" data-experiment-edit type="button">实验设置</button>
     </div>` : ''}
 
     <div class="grid grid-5" style="margin-bottom:16px">
@@ -819,15 +813,12 @@ async function renderTask(taskId) {
   $$('[data-task-action]').forEach((button) => {
     button.addEventListener('click', () => taskAction(task.id, button.dataset.taskAction));
   });
-  const baselineButton = $('[data-baseline-submit]');
-  if (baselineButton) baselineButton.addEventListener('click', () => baselineSubmit(task.id));
-  const continueButton = $('[data-continue-opt]');
-  if (continueButton) continueButton.addEventListener('click', () => continueOptimization(task.id));
+  const pauseButton = $('[data-pause-task]');
+  if (pauseButton) pauseButton.addEventListener('click', () => pauseTask(task.id));
+  const continueButton = $('[data-continue-task]');
+  if (continueButton) continueButton.addEventListener('click', () => continueTask(task.id));
   $$('[data-message]').forEach((button) => button.addEventListener('click', () => openMessageModal(task)));
-  $$('[data-budget]').forEach((button) => button.addEventListener('click', () => openBudgetModal(task)));
   $$('[data-experiment-edit]').forEach((button) => button.addEventListener('click', () => openExperimentModal(task)));
-  $$('[data-codex-run]').forEach((button) => button.addEventListener('click', () => openCodexModal(task)));
-  $('#task-refresh').addEventListener('click', () => renderTask(task.id).catch((e) => toast(e.message, 'error')));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
   });
@@ -1218,6 +1209,48 @@ async function baselineSubmit(taskId) {
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '基线提交失败', 'error');
+    if (!err.handled) await renderTask(taskId).catch(() => {});
+  }
+}
+
+async function pauseTask(taskId) {
+  try {
+    await api(`/api/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST', body: {} });
+    toast('任务已暂停；Codex 会话保留，可继续', 'success');
+    await renderTask(taskId);
+  } catch (err) {
+    toast(err.message || '暂停失败', 'error');
+    if (!err.handled) await renderTask(taskId).catch(() => {});
+  }
+}
+
+async function continueTask(taskId) {
+  const task = state.task;
+  if (!task) return;
+  try {
+    if (task.config?.execution_mode === 'codex') {
+      // Codex 任务用同一个入口恢复：已有 codex_session_ref 时继续原会话。
+      await api(`/api/tasks/${encodeURIComponent(taskId)}/codex-run`, {
+        method: 'POST',
+        body: {},
+      });
+      toast('Codex 会话继续中', 'success');
+    } else if (task.status === 'pending') {
+      await api(`/api/tasks/${encodeURIComponent(taskId)}/start`, { method: 'POST', body: {} });
+      toast('任务已开始', 'success');
+    } else if (['paused', 'needs_login', 'needs_review'].includes(task.status)) {
+      await api(`/api/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST', body: {} });
+      toast('任务已恢复', 'success');
+    } else {
+      await api(`/api/tasks/${encodeURIComponent(taskId)}/continue-optimization`, {
+        method: 'POST',
+        body: {},
+      });
+      toast('任务已继续', 'success');
+    }
+    await renderTask(taskId);
+  } catch (err) {
+    toast(err.message || '继续失败', 'error');
     if (!err.handled) await renderTask(taskId).catch(() => {});
   }
 }
