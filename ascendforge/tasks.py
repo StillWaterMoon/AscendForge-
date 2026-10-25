@@ -79,6 +79,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "codex_runner_started_at": None,
     "codex_session_ref": None,
     "codex_runner_token": None,
+    "codex_pause_requested": False,
     "manual_only": False,
     "strategy_prompt": "",
     "project_source": "empty",
@@ -628,6 +629,7 @@ class TaskService:
         config.pop("codex_runner_token", None)
         config["codex_runner_active"] = False
         config["codex_runner_status"] = "terminated"
+        config["codex_pause_requested"] = False
         self.db.execute(
             "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
             (json_dumps(config), now(), task_id),
@@ -640,6 +642,19 @@ class TaskService:
             return task
         if task["status"] != TASK_RUNNING:
             raise TaskError("BAD_STATE", f"只有 running 任务可以暂停，当前为 {task['status']}")
+        config = dict(task.get("config") or {})
+        if config.get("execution_mode") == "codex" and config.get("codex_runner_active"):
+            # Codex 暂停采用“软暂停”：保留 runner、app-server 和 thread，
+            # 只让循环停止发起新 turn。恢复时在同一个进程/会话上继续。
+            config["codex_pause_requested"] = True
+            config["codex_runner_status"] = "paused"
+            self.db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            add_event(self.db, task_id, None, "codex_pause_requested", {"reason": reason})
+            self._transition(task_id, TASK_PAUSED, reason=reason)
+            return self.get(task_id)
         self._terminate_codex_runner(task_id, reason=f"pause:{reason}")
         self._transition(task_id, TASK_PAUSED, reason=reason)
         return self.get(task_id)

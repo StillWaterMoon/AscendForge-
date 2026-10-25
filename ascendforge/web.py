@@ -1197,6 +1197,23 @@ class Handler(BaseHTTPRequestHandler):
             )
             add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
             task = self.app.tasks.get(task_id)
+        current_config = dict(task.get("config") or {})
+        if task["status"] == "paused" and current_config.get("codex_runner_active"):
+            # 软暂停：runner 和 app-server 还活着，直接把任务恢复成 running，
+            # 由原 runner 在同一个 thread 上继续下一轮。
+            current_config.pop("codex_pause_requested", None)
+            current_config["codex_runner_status"] = "running"
+            self.app.db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(current_config), now(), task_id),
+            )
+            self.app.tasks.resume(task_id)
+            add_event(self.app.db, task_id, None, "codex_soft_resume", {"pid": current_config.get("codex_runner_pid")})
+            return 200, {
+                "started": True,
+                "resumed_existing": True,
+                "task": self.app.tasks.get(task_id),
+            }
         body = self._read_json()
         prompt = str(body.get("prompt") or "").strip()
         if len(prompt) > 8000:

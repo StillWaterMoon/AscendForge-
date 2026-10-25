@@ -168,7 +168,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
 - 执行模式：新建任务可选 `LLM API` 或 `本地 Codex`；Codex 模式创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`），API 模式沿用服务器 Agent 循环，字段差异见 [执行模式](docs/execution-modes.md)
-- Codex 执行边界：暂停/停止会清理 Codex 进程树；Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
+- Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
 - Codex 真实闭环：已在本机对 CopySign 跑通一轮（工作区修改 → snapshot → 官方提交 → 15/15 Pass → 会话/usage 记录）；结果与限制见 [Codex 真实闭环](docs/attempts/codex-loop-real-round.md)
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 运行预算：`max_tokens=0` / `max_model_calls=0` 表示不限；提交上限、每日上限、尝试轮数、运行时长等仍由宿主强制执行，无限 Token 不等于无限提交

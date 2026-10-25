@@ -271,6 +271,7 @@ def run_codex_agent(
             "codex_runner_pid": os.getpid(),
             "codex_runner_token": token,
             "codex_runner_status": "running",
+            "codex_pause_requested": False,
         }
     )
     db.execute(
@@ -630,6 +631,11 @@ def run_codex_agent(
         turns = 0
         while True:
             current = tasks.get(task_id)
+            current_config = current.get("config") or {}
+            if current["status"] == "paused" and current_config.get("codex_pause_requested"):
+                # 软暂停：保留 runner、app-server 和 thread，只停止新 turn。
+                time.sleep(2)
+                continue
             if current["status"] != "running":
                 break
             instruction = startup if turns == 0 and not session_ref else (
@@ -697,7 +703,13 @@ def run_codex_agent(
                 )
                 break
             history.append({"turn": turns, "thread": session_ref, "last": result.last_message[:1000]})
-            if tasks.get(task_id)["status"] != "running":
+            current_after = tasks.get(task_id)
+            after_config = current_after.get("config") or {}
+            if current_after["status"] == "paused" and after_config.get("codex_pause_requested"):
+                # 暂停请求在 turn 结束时生效；保持进程和会话，等待继续。
+                time.sleep(2)
+                continue
+            if current_after["status"] != "running":
                 break
             time.sleep(2)
         return {"task_id": task_id, "turns": turns, "history": history, "session_ref": session_ref}
