@@ -88,18 +88,47 @@ class TaskStateTests(unittest.TestCase):
             },
         )
         with patch("ascendforge.tasks.subprocess.run") as run, patch(
-            "ascendforge.tasks._pid_alive", return_value=True
+            "ascendforge.tasks._probe_process",
+            return_value={"state": "alive", "pid": 4242, "method": "test", "error": None, "duration_ms": 1},
         ):
             self.env.tasks.pause(task["id"], "test")
             run.assert_not_called()
         refreshed = self.env.tasks.get(task["id"])
-        self.assertEqual(refreshed["status"], "paused")
+        # 两阶段：请求后仍 running，runner 确认后才 paused。
+        self.assertEqual(refreshed["status"], "running")
         self.assertTrue(refreshed["config"]["codex_runner_active"])
         self.assertEqual(refreshed["config"]["codex_runner_pid"], 4242)
-        self.assertEqual(refreshed["config"]["codex_runner_status"], "paused")
+        self.assertEqual(refreshed["config"]["codex_pause_phase"], "requested")
         self.assertTrue(refreshed["config"]["codex_pause_requested"])
-        # 软暂停不杀进程，会话和 pid 都保留。
-        self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
+        confirmed = self.env.tasks.confirm_codex_pause(task["id"])
+        self.assertEqual(confirmed["status"], "paused")
+        self.assertEqual(confirmed["config"]["codex_pause_phase"], "confirmed")
+        self.assertTrue(confirmed["config"]["codex_runner_active"])
+        self.assertEqual(confirmed["config"]["codex_session_ref"], "thread-keep")
+
+    def test_unknown_process_probe_does_not_kill_runner(self):
+        task = seed_task(
+            self.env,
+            status="running",
+            config={
+                "execution_mode": "codex",
+                "codex_runner_pid": 4242,
+                "codex_runner_active": True,
+                "codex_session_ref": "thread-unknown",
+            },
+        )
+        with patch("ascendforge.tasks.subprocess.run") as run, patch(
+            "ascendforge.tasks._probe_process",
+            return_value={"state": "unknown", "pid": 4242, "method": "test", "error": "timeout", "duration_ms": 5000},
+        ):
+            refreshed = self.env.tasks.pause(task["id"], "test")
+            run.assert_not_called()
+        self.assertEqual(refreshed["status"], "running")
+        self.assertTrue(refreshed["config"]["codex_runner_active"])
+        self.assertTrue(refreshed["config"]["codex_pause_requested"])
+        self.assertEqual(refreshed["config"]["codex_pause_phase"], "requested")
+        self.assertEqual(refreshed["config"]["codex_runner_status"], "unknown")
+        self.assertEqual(refreshed["config"]["codex_runner_pid"], 4242)
 
     def test_reconcile_orphaned_codex_runner(self):
         task = seed_task(

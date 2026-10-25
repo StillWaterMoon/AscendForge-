@@ -131,6 +131,9 @@ class Worker:
                 continue
             if task["status"] != TASK_RUNNING:
                 continue
+            if json_loads(task.get("config_json"), {}).get("codex_pause_requested"):
+                # 暂停已请求但 runner 尚未确认：不发送排队中的新提交。
+                continue
             try:
                 self.platform.adapter()
             except Exception:

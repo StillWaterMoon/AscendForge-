@@ -16,7 +16,7 @@
 - 每个任务一个 Codex app-server thread
 - 会话名自动设为“题目名+算子优化”，例如 `AddN算子优化`
 - 创建任务后自动启动 Codex 会话
-- 任务页只有“继续任务 / 暂停任务”；Codex 暂停为软暂停，保留进程和 thread，继续时接原会话
+- 任务页只有“继续任务 / 暂停任务”；Codex 暂停分 requested/confirmed 两阶段：点击后显示“暂停中”，runner 在安全边界确认后才显示 paused；继续时接原进程和 thread
 - 可选上传项目模板 ZIP：
   - 上传：Codex 从该工程开始
   - 不传：空项目，从 0 开始
@@ -38,7 +38,7 @@ POST /api/tasks
 ```
 
 如果 Codex 启动失败，任务仍会创建，响应里带有 `codex_start_error`，
-可以在任务详情手动点击“Codex 运行”重试。
+可以在任务详情点击“继续任务”重试。
 
 ## MCP 配置的含义
 

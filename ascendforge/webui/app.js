@@ -473,6 +473,19 @@ function phaseLabel(phase) {
   return ({ baseline: '建立基线', compile: '编译修复', runtime: '运行修复', correctness: '正确性', performance: '性能优化', verify: '确认结果' })[phase] || phase || '等待结果';
 }
 
+function codexPhaseLabel(phase) {
+  return ({
+    starting_process: '启动 Codex 进程',
+    starting_session: '建立 Codex 会话',
+    resuming_session: '恢复 Codex 会话',
+    session_ready: '会话已恢复',
+    turn_started: 'Codex 执行中',
+    tool_call: 'Codex 调用工具',
+    turn_completed: '本轮执行完成',
+    turn_failed: '本轮执行失败',
+  })[phase] || (phase ? phase : '等待 Codex 事件');
+}
+
 function limitLabel(value) {
   return value === 0 || value === null || value === undefined ? '不限' : String(value);
 }
@@ -729,7 +742,9 @@ async function renderTask(taskId) {
       <div class="toolbar">
         ${(() => {
           const codexActive = task.config?.execution_mode === 'codex' && task.config?.codex_runner_active;
+          const pausing = task.config?.execution_mode === 'codex' && task.config?.codex_pause_phase === 'requested';
           const running = task.status === 'running' && (task.config?.execution_mode !== 'codex' || codexActive);
+          if (pausing) return '<button class="btn btn-primary" type="button" disabled>暂停中…</button>';
           return running
             ? '<button class="btn btn-primary" data-pause-task="1" type="button">暂停任务</button>'
             : '<button class="btn btn-primary" data-continue-task="1" type="button">继续任务</button>';
@@ -748,8 +763,9 @@ async function renderTask(taskId) {
     </div>
 
     ${task.config?.codex_runner_active ? `<div class="experiment-strip codex-run-strip">
-      <span class="experiment-title">Codex 运行中</span>
+      <span class="experiment-title">${config.codex_pause_phase === 'requested' ? 'Codex 暂停中' : task.status === 'paused' ? 'Codex 已暂停' : 'Codex 运行中'}</span>
       <span>PID <b class="mono">${esc(task.config.codex_runner_pid || '—')}</b></span>
+      <span>${esc(codexPhaseLabel(config.codex_resume_phase))}</span>
       <span>${esc(task.config.codex_runner_status || 'running')}</span>
       ${task.config.codex_session_ref ? `<span>thread <b class="mono">${esc(task.config.codex_session_ref)}</b></span>` : ''}
       ${task.config.codex_runner_log ? `<span class="mono">${esc(String(task.config.codex_runner_log).split(/[\\/]/).pop())}</span>` : ''}
@@ -1216,7 +1232,7 @@ async function baselineSubmit(taskId) {
 async function pauseTask(taskId) {
   try {
     await api(`/api/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST', body: {} });
-    toast('任务已暂停；Codex 会话保留，可继续', 'success');
+    toast('暂停请求已发送，等待 Codex 在安全边界确认', 'success');
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '暂停失败', 'error');

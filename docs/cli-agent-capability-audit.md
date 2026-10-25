@@ -171,7 +171,7 @@ If the Codex client does not list the thread immediately, it can be opened from 
 codex resume <thread_id>
 ```
 
-The same Web “Codex 运行” button starts this app-server loop. Codex still cannot
+The same Web “继续任务” action starts this app-server loop. Codex still cannot
 submit to CANNJudge directly; only the host snapshots and scheduler submit.
 
 ## 6.2 Tool-driven continuous session
@@ -195,11 +195,11 @@ loop:
 - there is no configured round count. The session continues until the user
   pauses/stops the task or a real transport error occurs.
 
-The Web “Codex 运行” action therefore starts a persistent task session, not a
+The Web “继续任务” action therefore starts a persistent task session, not a
 one-shot request. Pause/stop terminates the platform-started process tree;
 submission frequency and unknown/reconciliation protections remain host-side.
 
-The Web task detail exposes “Codex 运行” for this local loop. Pause/stop now
+The Web task detail exposes “继续任务” for this local loop. Pause/stop now
 terminates the platform-started Codex process tree by PID; duplicate starts are
 guarded. Codex mode bypasses cumulative attempt/model/token/runtime/stall stops,
 while submission interval, submission quota, in-flight, idempotency and unknown

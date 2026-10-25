@@ -215,6 +215,8 @@ class Scheduler:
             raise TaskError("TASK_NOT_FOUND", "任务不存在")
         if task["status"] != TASK_RUNNING:
             raise TaskError("BAD_STATE", f"任务当前为 {task['status']}，不能申请提交")
+        if json_loads(task.get("config_json"), {}).get("codex_pause_requested"):
+            raise TaskError("TASK_PAUSING", "暂停确认中，禁止创建新的官方提交")
         attempt = get_attempt(self.db, attempt_id)
         if not attempt or attempt["task_id"] != task_id:
             raise TaskError("BAD_ATTEMPT", "attempt 不属于该任务")
@@ -283,6 +285,8 @@ class Scheduler:
     def _check_limits_locked(self, conn, task: dict, config: dict) -> Reservation:
         if task["status"] != TASK_RUNNING:
             return Reservation(False, f"task_not_running:{task['status']}")
+        if config.get("codex_pause_requested"):
+            return Reservation(False, "task_pausing")
         if self._unknown_count(conn) > 0:
             return Reservation(False, "global_submission_unknown")
         inflight = self._inflight(conn)

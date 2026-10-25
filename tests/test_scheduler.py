@@ -27,6 +27,13 @@ class SchedulerTests(unittest.TestCase):
         submission = self.env.scheduler.request_submission(task["id"], attempt["id"])
         return attempt, submission
 
+    def test_pausing_task_cannot_queue_new_submission(self):
+        task = self._running_task(codex_pause_requested=True)
+        attempt = seed_attempt(self.env, task, source="// paused")
+        with self.assertRaises(TaskError) as raised:
+            self.env.scheduler.request_submission(task["id"], attempt["id"])
+        self.assertEqual(raised.exception.code, "TASK_PAUSING")
+
     def test_claim_send_and_interval_persist_across_restart(self):
         task = self._running_task()
         attempt, submission = self._queue(task)

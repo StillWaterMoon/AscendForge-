@@ -272,12 +272,37 @@ def run_codex_agent(
             "codex_runner_token": token,
             "codex_runner_status": "running",
             "codex_pause_requested": False,
+            "codex_pause_phase": None,
+            "codex_resume_phase": "starting_session" if not config.get("codex_session_ref") else "resuming_session",
+            "codex_phase_updated_at": now(),
         }
     )
     db.execute(
         "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
         (json_dumps(config), now(), task_id),
     )
+
+    def persist(**changes) -> None:
+        """Merge one field into the latest DB config.
+
+        Pause can be requested while the runner is inside a turn.  Writing a
+        stale local ``config`` copy would erase ``codex_pause_requested`` (and
+        has caused exactly that race), so always merge into fresh DB state.
+        """
+        row = db.query_one("SELECT config_json FROM tasks WHERE id=?", (task_id,))
+        latest = json_loads(row.get("config_json"), {}) if row else {}
+        latest.update(changes)
+        config.clear()
+        config.update(latest)
+        db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(latest), now(), task_id),
+        )
+
+    def phase(value: str, **extra) -> None:
+        persist(codex_resume_phase=value, codex_phase_updated_at=now(), **extra)
+        add_event(db, task_id, None, "codex_phase", {"phase": value, **extra})
+
     experiment = ensure_active(db, task_id)
     parent_id, parent_files = _parent_source(db, settings, task)
     workspace_root = Path(settings.data_dir) / "cli_workspaces" / task_id
@@ -292,11 +317,7 @@ def run_codex_agent(
         # thread_id，恢复它以便继续原对话。
         session_ref = _recover_codex_session_ref(db, task_id)
         if session_ref:
-            config["codex_session_ref"] = session_ref
-            db.execute(
-                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-                (json_dumps(config), now(), task_id),
-            )
+            persist(codex_session_ref=session_ref)
             add_event(db, task_id, None, "codex_session_recovered", {"thread_id": session_ref})
     state = {
         "parent_id": parent_id,
@@ -310,13 +331,40 @@ def run_codex_agent(
 
     def on_event(event) -> None:
         if event.type == "thread.started" and event.raw.get("thread_id"):
-            config["codex_session_ref"] = str(event.raw["thread_id"])
-            config["codex_runner_status"] = "running"
-            db.execute(
-                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-                (json_dumps(config), now(), task_id),
+            thread_id = str(event.raw["thread_id"])
+            persist(
+                codex_session_ref=thread_id,
+                codex_resume_phase="session_ready",
+                codex_phase_updated_at=now(),
             )
-            add_event(db, task_id, None, "codex_thread_started", {"thread_id": config["codex_session_ref"]})
+            add_event(db, task_id, None, "codex_thread_started", {"thread_id": thread_id})
+        elif event.type == "turn.started":
+            turn_id = str(event.raw.get("turn_id") or "")
+            persist(
+                codex_turn_id=turn_id or config.get("codex_turn_id"),
+                codex_resume_phase="turn_started",
+                codex_phase_updated_at=now(),
+            )
+            add_event(db, task_id, None, "codex_turn_started", {"turn_id": turn_id, "thread_id": config.get("codex_session_ref")})
+        elif event.type == "tool_call":
+            tool = str(event.raw.get("tool") or "")
+            persist(codex_resume_phase="tool_call", codex_phase_updated_at=now())
+            add_event(
+                db,
+                task_id,
+                None,
+                "codex_tool_call_started",
+                {"tool": tool, "call_id": event.raw.get("call_id"), "turn_id": event.raw.get("turn_id")},
+            )
+        elif event.type == "turn.completed":
+            persist(codex_resume_phase="turn_completed", codex_phase_updated_at=now())
+            add_event(
+                db,
+                task_id,
+                None,
+                "codex_turn_completed",
+                {"turn_id": str(event.raw.get("turn_id") or config.get("codex_turn_id") or "")},
+            )
 
     def collect_effective() -> tuple[dict[str, str], dict]:
         workspace_files = {}
@@ -396,8 +444,11 @@ def run_codex_agent(
         if tool == "submit_official":
             # 只保存快照并排队，立即返回 submission_id；不阻塞等待远端结果。
             # Codex 之后调用 read_official_evaluation 查询。
-            if tasks.get(task_id)["status"] != "running":
+            current_task = tasks.get(task_id)
+            if current_task["status"] != "running":
                 raise ValueError("task must be running to submit_official")
+            if (current_task.get("config") or {}).get("codex_pause_requested"):
+                raise ValueError("task pause is pending; no new official submission is allowed")
             request_id = str(arguments.get("request_id") or "").strip() or None
             if request_id:
                 existing = db.query_one(
@@ -632,8 +683,10 @@ def run_codex_agent(
         while True:
             current = tasks.get(task_id)
             current_config = current.get("config") or {}
-            if current["status"] == "paused" and current_config.get("codex_pause_requested"):
-                # 软暂停：保留 runner、app-server 和 thread，只停止新 turn。
+            if current_config.get("codex_pause_requested"):
+                # 两阶段暂停：runner 在当前 turn 的安全边界确认后，任务才 paused。
+                if current["status"] == "running":
+                    tasks.confirm_codex_pause(task_id)
                 time.sleep(2)
                 continue
             if current["status"] != "running":
@@ -643,30 +696,36 @@ def run_codex_agent(
                 "不要等待用户逐步指挥，直到用户暂停或停止。"
             )
             if session_ref:
+                phase("resuming_session", codex_session_ref=session_ref, codex_turn_id=None)
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "codex_session_resume_requested",
+                    {"thread_id": session_ref, "request_id": config.get("codex_resume_request_id")},
+                )
                 result = adapter.resume(
                     session_ref, instruction, workspace=workspace, output_file=workspace_root / "last.txt"
                 )
-                if result.error and any(
-                    marker in result.error.lower()
-                    for marker in ("start_timeout", "websocket", "connection")
-                ):
-                    # 旧 thread 可能因进程被杀/异常 turn 卡死。保留 workspace，
-                    # 用新的 thread 继续，避免任务显示 running 却永远不产生提交。
+                if result.error:
+                    # 不自动新建 thread 掩盖恢复失败；保留原 thread 和错误，
+                    # 由用户决定下一步。
                     add_event(
                         db,
                         task_id,
                         None,
-                        "codex_resume_fallback",
-                        {"old_thread": session_ref, "error": result.error},
-                    )
-                    session_ref = None
-                    result = adapter.start(
-                        startup,
-                        workspace=workspace,
-                        output_file=workspace_root / "last.txt",
-                        sandbox="workspace-write",
+                        "codex_resume_failed",
+                        {"thread_id": session_ref, "error": result.error},
                     )
             else:
+                phase("starting_session")
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "codex_session_start_requested",
+                    {"request_id": config.get("codex_resume_request_id")},
+                )
                 result = adapter.start(
                     instruction,
                     workspace=workspace,
@@ -675,11 +734,8 @@ def run_codex_agent(
                 )
             session_ref = result.session_ref or session_ref
             if session_ref:
-                config["codex_session_ref"] = session_ref
-                db.execute(
-                    "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-                    (json_dumps(config), now(), task_id),
-                )
+                persist(codex_session_ref=session_ref)
+            phase("turn_completed" if not result.error else "turn_failed")
             _record_run(
                 db,
                 task_id=task_id,
@@ -705,8 +761,10 @@ def run_codex_agent(
             history.append({"turn": turns, "thread": session_ref, "last": result.last_message[:1000]})
             current_after = tasks.get(task_id)
             after_config = current_after.get("config") or {}
-            if current_after["status"] == "paused" and after_config.get("codex_pause_requested"):
+            if after_config.get("codex_pause_requested"):
                 # 暂停请求在 turn 结束时生效；保持进程和会话，等待继续。
+                if current_after["status"] == "running":
+                    tasks.confirm_codex_pause(task_id)
                 time.sleep(2)
                 continue
             if current_after["status"] != "running":

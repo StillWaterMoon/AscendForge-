@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **129 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **131 passed**
 
 状态含义：
 
@@ -32,7 +32,7 @@
 | 新建任务上传项目模板 ZIP / 可选空项目 | PASS (unit/HTTP) | `test_project_template`：ZIP 解压、单根目录归一、空项目、路径穿越拒绝；`test_web`：上传接口 + 创建任务 |
 | 新建任务选择 LLM API / 本地 Codex | PASS (HTTP) | API 模式沿用平台模板和 Agent；Codex 模式可选 ZIP、创建后自动启动会话并发送占位 skill；见 `test_web` / `test_codex_loop` |
 | Codex 三工具 `read_problem` / `submit_official` / `read_official_evaluation` | PASS (LIVE dynamic tool) | app-server 实际会话中 Codex 自主调用 `read_problem(url)`，并连续调用 `submit_official` → `read_official_evaluation`；工具回调为测试桩，提交/查询宿主处理器由单元测试覆盖 |
-| Codex 暂停/继续保留会话 | PASS (unit) | 软暂停保留 runner/app-server/thread，只停新 turn；继续走同一会话。旧版本丢失的引用从 `codex_thread_started` 恢复；孤儿 runner 自动清理；任务页只保留“继续任务/暂停任务” |
+| Codex 暂停/继续保留会话 | PASS (unit) | 进程检查区分 alive/dead/unknown，unknown 不强杀；暂停 requested→confirmed，暂停期间禁止新提交；恢复阶段记录 phase；恢复失败不自动新建 thread；孤儿 runner 只在确认 dead 时清理；任务页只保留继续/暂停 |
 | 凭据不进模型上下文/实验文件，生成代码隔离 | PASS (unit) | 加密、掩码、环境清洗、档案扫描无 key |
 | 最终报告区分真实/mock/未验证 | PASS | 本文 + README + phase0 |
 

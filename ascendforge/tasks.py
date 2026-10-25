@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +82,15 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "codex_session_ref": None,
     "codex_runner_token": None,
     "codex_pause_requested": False,
+    "codex_pause_phase": None,
+    "codex_pause_requested_at": None,
+    "codex_pause_confirmed_at": None,
+    "codex_process_probe": None,
+    "codex_resume_phase": None,
+    "codex_resume_request_id": None,
+    "codex_resume_started_at": None,
+    "codex_turn_id": None,
+    "codex_phase_updated_at": None,
     "manual_only": False,
     "strategy_prompt": "",
     "project_source": "empty",
@@ -159,27 +170,58 @@ def _uploaded_template(archive: Path, task_dir: Path) -> tuple[dict, str]:
     return {"files": files, "source": "upload"}, hashlib.sha256(archive.read_bytes()).hexdigest()
 
 
-def _pid_alive(pid: object) -> bool:
+def _probe_process(pid: object) -> dict:
+    """Return ``alive``, ``dead`` or ``unknown`` for a process id.
+
+    ``unknown`` is intentionally not treated as dead: a failed probe must
+    never trigger an automatic hard kill of a possibly live Codex runner.
+    """
+    started = time.perf_counter()
+
+    def result(state: str, method: str, error: str | None = None) -> dict:
+        return {
+            "state": state,
+            "pid": pid,
+            "method": method,
+            "error": error,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+
     try:
         value = int(pid)
     except (TypeError, ValueError):
-        return False
+        return result("dead", "none", "invalid pid")
+    if value <= 0:
+        return result("dead", "none", "invalid pid")
     if os.name == "nt":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, value)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            error = ctypes.get_last_error()
+            if error == 5:  # access denied: process exists, state not inspectable
+                return result("unknown", "OpenProcess", "access denied")
+            return result("dead", "OpenProcess", f"OpenProcess error {error}")
         try:
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {value}", "/FO", "CSV", "/NH"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            return str(value) in (result.stdout or "")
-        except Exception:
-            return False
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return result("unknown", "GetExitCodeProcess", "GetExitCodeProcess failed")
+            return result("alive" if code.value == 259 else "dead", "GetExitCodeProcess")
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(value, 0)
-        return True
-    except OSError:
-        return False
+        return result("alive", "kill(0)")
+    except ProcessLookupError:
+        return result("dead", "kill(0)")
+    except PermissionError:
+        return result("unknown", "kill(0)", "permission denied")
+    except OSError as exc:
+        return result("unknown", "kill(0)", str(exc))
+
+
+def _pid_alive(pid: object) -> bool:
+    """Compatibility wrapper; only a positive probe counts as alive."""
+    return _probe_process(pid)["state"] == "alive"
 
 
 def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
@@ -279,18 +321,26 @@ class TaskService:
         config = dict(task.get("config") or {})
         if config.get("execution_mode") != "codex" or not config.get("codex_runner_active"):
             return task
-        if _pid_alive(config.get("codex_runner_pid")):
-            return task
+        probe = _probe_process(config.get("codex_runner_pid"))
+        config["codex_process_probe"] = probe
+        if probe["state"] != "dead":
+            # alive 或 unknown 都不能擅自当作退出；unknown 保留现场。
+            self.db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(config), now(), task_id),
+            )
+            return self.get(task_id)
         config["codex_runner_active"] = False
         config.pop("codex_runner_pid", None)
         config.pop("codex_runner_token", None)
         config["codex_runner_status"] = "terminated"
         config["codex_pause_requested"] = False
+        config["codex_pause_phase"] = None
         self.db.execute(
             "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
             (json_dumps(config), now(), task_id),
         )
-        add_event(self.db, task_id, None, "codex_runner_orphaned", {})
+        add_event(self.db, task_id, None, "codex_runner_orphaned", {"probe": probe})
         return self.get(task_id)
 
     def messages(self, task_id: str, *, limit: int = 50) -> list[dict]:
@@ -646,13 +696,13 @@ class TaskService:
         self._transition(task_id, TASK_RUNNING, reason="start")
         return self.get(task_id)
 
-    def _terminate_codex_runner(self, task_id: str, *, reason: str) -> None:
+    def _terminate_codex_runner(self, task_id: str, *, reason: str, kill: bool = True) -> None:
         task = self.db.query_one("SELECT config_json FROM tasks WHERE id=?", (task_id,))
         if not task:
             return
         config = json_loads(task.get("config_json"), {})
         pid = config.get("codex_runner_pid")
-        if pid:
+        if pid and kill:
             try:
                 pid = int(pid)
                 if os.name == "nt":
@@ -666,18 +716,48 @@ class TaskService:
                     os.killpg(pid, 15)
             except Exception as exc:
                 log.warning("failed to terminate Codex runner %s: %s", pid, exc)
-        # 关键：暂停/停止只结束进程，不清理 codex_session_ref。
-        # 否则恢复时会新建一个会话，看起来像“没有接着之前的会话”。
+        # 结束进程不清理 codex_session_ref；恢复时仍使用同一个 thread。
         config.pop("codex_runner_pid", None)
         config.pop("codex_runner_token", None)
         config["codex_runner_active"] = False
         config["codex_runner_status"] = "terminated"
         config["codex_pause_requested"] = False
+        config["codex_pause_phase"] = None
         self.db.execute(
             "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
             (json_dumps(config), now(), task_id),
         )
-        add_event(self.db, task_id, None, "codex_runner_terminated", {"pid": pid, "reason": reason})
+        add_event(
+            self.db,
+            task_id,
+            None,
+            "codex_runner_terminated",
+            {"pid": pid, "reason": reason, "killed": bool(pid and kill)},
+        )
+
+    def confirm_codex_pause(self, task_id: str) -> dict:
+        """Runner 确认已停在 turn 边界；任务这时才显示 paused。"""
+        task = self.get(task_id)
+        config = dict(task.get("config") or {})
+        if task["status"] != TASK_RUNNING or not config.get("codex_pause_requested"):
+            return task
+        config["codex_pause_phase"] = "confirmed"
+        config["codex_pause_confirmed_at"] = now()
+        config["codex_runner_status"] = "paused"
+        config["codex_resume_phase"] = None
+        self.db.execute(
+            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+            (json_dumps(config), now(), task_id),
+        )
+        add_event(
+            self.db,
+            task_id,
+            None,
+            "codex_pause_confirmed",
+            {"pid": config.get("codex_runner_pid"), "turn_id": config.get("codex_turn_id")},
+        )
+        self._transition(task_id, TASK_PAUSED, reason="user")
+        return self.get(task_id)
 
     def pause(self, task_id: str, reason: str = "user") -> dict:
         task = self.get(task_id)
@@ -686,21 +766,48 @@ class TaskService:
         if task["status"] != TASK_RUNNING:
             raise TaskError("BAD_STATE", f"只有 running 任务可以暂停，当前为 {task['status']}")
         config = dict(task.get("config") or {})
-        if (
-            config.get("execution_mode") == "codex"
-            and config.get("codex_runner_active")
-            and _pid_alive(config.get("codex_runner_pid"))
-        ):
-            # Codex 暂停采用“软暂停”：保留 runner、app-server 和 thread，
-            # 只让循环停止发起新 turn。恢复时在同一个进程/会话上继续。
+        probe = _probe_process(config.get("codex_runner_pid"))
+        config["codex_process_probe"] = probe
+        if config.get("execution_mode") == "codex" and config.get("codex_runner_active"):
+            if probe["state"] == "alive":
+                # 两阶段软暂停：先请求，runner 在安全边界确认后才变成 paused。
+                config["codex_pause_requested"] = True
+                config["codex_pause_phase"] = "requested"
+                config["codex_pause_requested_at"] = now()
+                config["codex_runner_status"] = "pause_pending"
+                self.db.execute(
+                    "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                    (json_dumps(config), now(), task_id),
+                )
+                add_event(
+                    self.db,
+                    task_id,
+                    None,
+                    "codex_pause_requested",
+                    {"reason": reason, "probe": probe},
+                )
+                return self.get(task_id)
+            if probe["state"] == "dead":
+                self._terminate_codex_runner(task_id, reason=f"pause:{reason}:dead", kill=False)
+                self._transition(task_id, TASK_PAUSED, reason=reason)
+                add_event(self.db, task_id, None, "codex_runner_dead", {"probe": probe})
+                return self.get(task_id)
+            # unknown：状态检查失败不能当作死亡，更不能自动强杀。
             config["codex_pause_requested"] = True
-            config["codex_runner_status"] = "paused"
+            config["codex_pause_phase"] = "requested"
+            config["codex_pause_requested_at"] = now()
+            config["codex_runner_status"] = "unknown"
             self.db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(config), now(), task_id),
             )
-            add_event(self.db, task_id, None, "codex_pause_requested", {"reason": reason})
-            self._transition(task_id, TASK_PAUSED, reason=reason)
+            add_event(
+                self.db,
+                task_id,
+                None,
+                "codex_pause_probe_unknown",
+                {"reason": reason, "probe": probe},
+            )
             return self.get(task_id)
         self._terminate_codex_runner(task_id, reason=f"pause:{reason}")
         self._transition(task_id, TASK_PAUSED, reason=reason)

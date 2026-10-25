@@ -1112,6 +1112,14 @@ class Handler(BaseHTTPRequestHandler):
     def _launch_codex_runner(self, task_id: str, prompt: str, session: dict | None) -> dict:
         """启动一个 Codex app-server 会话（Web 按钮和创建任务共用）。"""
         task = self.app.tasks.get(task_id)
+        # 先把任务切换到 running，再启动子进程；否则前端在 child 尚未
+        # 完成 tasks.start 时点“暂停任务”会收到 pending/BAD_STATE。
+        if task["status"] == "pending":
+            task = self.app.tasks.start(task_id)
+        elif task["status"] == "paused":
+            task = self.app.tasks.resume(task_id)
+        elif task["status"] != "running":
+            raise ApiError(400, "BAD_STATE", f"任务当前为 {task['status']}，不能启动 Codex")
         config = dict(task.get("config") or {})
         if config.get("codex_runner_active"):
             raise ApiError(409, "CODEX_ALREADY_RUNNING", "该任务已有 Codex 运行中")
@@ -1135,6 +1143,23 @@ class Handler(BaseHTTPRequestHandler):
             command.extend(["--prompt", prompt])
         config["codex_runner_log"] = str(log_path)
         config["codex_runner_status"] = "starting"
+        config["codex_pause_requested"] = False
+        config["codex_pause_phase"] = None
+        config["codex_resume_phase"] = "resuming_session" if config.get("codex_session_ref") else "starting_session"
+        config["codex_resume_request_id"] = new_id("coderesume")
+        config["codex_resume_started_at"] = now()
+        config["codex_phase_updated_at"] = now()
+        add_event(
+            self.app.db,
+            task_id,
+            None,
+            "codex_resume_requested",
+            {
+                "request_id": config["codex_resume_request_id"],
+                "thread_id": config.get("codex_session_ref"),
+                "mode": "new_process",
+            },
+        )
         self.app.db.execute(
             "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
             (json_dumps(config), now(), task_id),
@@ -1200,17 +1225,51 @@ class Handler(BaseHTTPRequestHandler):
             add_event(self.app.db, task_id, None, "codex_run_reopened", {"previous_status": task["status"]})
             task = self.app.tasks.get(task_id)
         current_config = dict(task.get("config") or {})
-        if task["status"] == "paused" and current_config.get("codex_runner_active"):
-            # 软暂停：runner 和 app-server 还活着，直接把任务恢复成 running，
-            # 由原 runner 在同一个 thread 上继续下一轮。
-            current_config.pop("codex_pause_requested", None)
+        if task["status"] == "running" and current_config.get("codex_pause_requested"):
+            # 暂停还在 requested 阶段时用户又点继续：取消暂停请求，不重启 runner。
+            current_config["codex_pause_requested"] = False
+            current_config["codex_pause_phase"] = None
             current_config["codex_runner_status"] = "running"
             self.app.db.execute(
                 "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
                 (json_dumps(current_config), now(), task_id),
             )
+            add_event(self.app.db, task_id, None, "codex_pause_cancelled", {})
+            return 200, {"started": True, "resumed_existing": True, "task": self.app.tasks.get(task_id)}
+        if task["status"] == "paused" and current_config.get("codex_runner_active"):
+            # 软暂停：runner 和 app-server 还活着，直接把任务恢复成 running，
+            # 由原 runner 在同一个 thread 上继续下一轮。
+            request_id = new_id("coderesume")
+            current_config["codex_pause_requested"] = False
+            current_config["codex_pause_phase"] = None
+            current_config["codex_runner_status"] = "running"
+            current_config["codex_resume_phase"] = "resuming_session"
+            current_config["codex_resume_request_id"] = request_id
+            current_config["codex_resume_started_at"] = now()
+            current_config["codex_phase_updated_at"] = now()
+            self.app.db.execute(
+                "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
+                (json_dumps(current_config), now(), task_id),
+            )
             self.app.tasks.resume(task_id)
-            add_event(self.app.db, task_id, None, "codex_soft_resume", {"pid": current_config.get("codex_runner_pid")})
+            add_event(
+                self.app.db,
+                task_id,
+                None,
+                "codex_resume_requested",
+                {
+                    "request_id": request_id,
+                    "thread_id": current_config.get("codex_session_ref"),
+                    "mode": "soft",
+                },
+            )
+            add_event(
+                self.app.db,
+                task_id,
+                None,
+                "codex_soft_resume",
+                {"pid": current_config.get("codex_runner_pid"), "request_id": request_id},
+            )
             return 200, {
                 "started": True,
                 "resumed_existing": True,

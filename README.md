@@ -13,7 +13,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 129 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 131 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
@@ -144,7 +144,7 @@ ascendforge/
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
   backup.py, cli.py, db.py, states.py
 skills/                  通用优化 / Ascend / 测试生成 / 工作台 / CLI 启动 skill
-tests/                   129 个 unittest
+tests/                   131 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -164,7 +164,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 参数实验：`parameter-run` 是宿主侧确定性 runner；配置枚举、固定基线、参数化源码快照、结果复用、失败重试、复测和预算耗尽均有记录；`--simulate` 不产生远端提交，真实模式通过 scheduler 提交并等待结果
 - 通用闭环：阶段、责任边界、已验证场景和剩余缺口见 [通用优化闭环](docs/general-optimization-loop.md)；参数扫描是可选执行器，不是所有实验的固定形式
 - CLI Agent 迁移：能力核查与阻塞项见 [CLI Agent 能力核查](docs/cli-agent-capability-audit.md)；当前 Codex CLI 可用，DeepSeek CLI 未安装，尚未切换到 CLI 执行循环
-- 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“Codex 运行”启动同一会话
+- 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“继续任务”恢复同一会话
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
 - 执行模式：新建任务可选 `LLM API` 或 `本地 Codex`；Codex 模式创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`），API 模式沿用服务器 Agent 循环，字段差异见 [执行模式](docs/execution-modes.md)
