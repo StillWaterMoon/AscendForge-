@@ -179,9 +179,9 @@ submit to CANNJudge directly; only the host snapshots and scheduler submit.
 The current `codex-loop` path is a tool-driven conversation, not a fixed round
 loop:
 
-- the first turn currently carries the placeholder skill text
-  `HELLO！ HELLO`; the full skill file remains in the repository for the next
-  step;
+- the first turn carries the real `skills/start-operator-optimization/SKILL.md`
+  and `TOOLS.md`, plus task URL, workspace, template mode, editable/read-only
+  file list and scoring target;
 - the app-server thread receives exactly three dynamic tools:
   `read_problem`, `submit_official`, `read_official_evaluation`;
 - when Codex emits `item/tool/call`, the Node bridge sends the call to Python,

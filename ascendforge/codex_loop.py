@@ -542,16 +542,37 @@ def run_codex_agent(
                 },
                 instructions="Use the provided dynamic tools; do not attempt to submit outside them.",
             )
-        # 第一阶段先验证“创建任务 → 自动建 Codex 会话 → 发送 skill”链路，
-        # skill 内容暂时占位；后续把真实 SKILL.md 注入这里即可。
-        placeholder_skill = "HELLO！ HELLO"
+        # 首次启动注入真实 SKILL.md 和 TOOLS.md，而不是占位文本。
+        skill_path = Path(settings.root) / "skills" / "start-operator-optimization" / "SKILL.md"
+        tools_path = Path(settings.root) / "skills" / "start-operator-optimization" / "TOOLS.md"
+        skill_text = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "SKILL.md 未找到"
+        tools_text = tools_path.read_text(encoding="utf-8") if tools_path.is_file() else "TOOLS.md 未找到"
+        template = task.get("template") or {}
+        template_files = [
+            item for item in (template.get("files") or []) if isinstance(item, dict)
+        ]
+        editable_files = [str(item.get("path")) for item in template_files if item.get("editable")]
+        readonly_files = [str(item.get("path")) for item in template_files if not item.get("editable")]
+        project_source = str(config.get("project_source") or "empty")
+        if project_source == "upload":
+            template_info = (
+                f"项目模板：已上传并解压到 {settings.data_dir / 'tasks' / task_id / 'project-template'}\n"
+            )
+        else:
+            template_info = "项目模板：未上传，workspace 从空项目开始，需要自行创建源码和构建文件。\n"
         startup = (
-            "初始 skill（占位）：\n"
-            + placeholder_skill
-            + "\n\n"
-            + "使用上述 skill 开展持续算子优化。\n"
+            "下面是首次启动必须完整阅读的 skill 和工具合同。\n\n"
+            "===== SKILL.md =====\n"
+            + skill_text
+            + "\n\n===== TOOLS.md =====\n"
+            + tools_text
+            + "\n\n===== 任务启动信息 =====\n"
             + f"任务 ID：{task_id}\n工作目录：{workspace}\n"
             + f"题目链接：{task.get('problem_url') or ''}\n"
+            + template_info
+            + f"允许提交文件：{', '.join(editable_files) if editable_files else '由 Codex 按题面创建；根目录 .asc/.h'}\n"
+            + f"只读文件：{', '.join(readonly_files) if readonly_files else '无额外只读文件'}\n"
+            + f"评分指标：{config.get('metric') or 'auto'}；目标：{config.get('target_score')}\n"
             + "可用工具只有三个：\n"
             + "1. read_problem(url)：读取完整题面；\n"
             + "2. submit_official(request_id?, hypothesis?)：保存当前 workspace 快照并排队官方提交，立即返回 submission_id；\n"

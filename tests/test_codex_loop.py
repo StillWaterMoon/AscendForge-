@@ -151,7 +151,9 @@ class CodexLoopTests(unittest.TestCase):
         ):
             result = run_codex_agent(env.settings, task["id"], timeout_sec=10)
         self.assertEqual(result["turns"], 1)
-        self.assertIn("HELLO！ HELLO", adapter.prompts[0])
+        self.assertIn("持续优化算子", adapter.prompts[0])
+        self.assertIn("TOOLS.md", adapter.prompts[0])
+        self.assertIn("任务启动信息", adapter.prompts[0])
         # API/网络错误即使 exit_code=0 也必须结束并暂停，不能留下 running 空壳。
         task_now = env.tasks.get(task["id"])
         self.assertEqual(task_now["status"], "paused")
