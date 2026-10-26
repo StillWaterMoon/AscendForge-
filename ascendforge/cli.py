@@ -257,9 +257,6 @@ def cmd_status(args) -> int:
             "capabilities": {
                 "npu": caps.get("npu"),
                 "cann": caps.get("cann"),
-                "docker": caps.get("docker"),
-                "executor": caps.get("executor"),
-                "candidate_execution": caps.get("candidate_execution"),
             },
         },
         pretty=True,

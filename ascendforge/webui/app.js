@@ -408,7 +408,6 @@ async function renderDashboard() {
       <div class="row" style="gap:22px">
         <div class="small"><span class="faint">CANNJudge：</span>${platform.connected ? badge('已连接', 'completed') : badge('未连接', 'pending')} <span class="muted">${esc(platform.account_masked || '')}</span></div>
         <div class="small"><span class="faint">执行器：</span>${badge('本地 CLI', 'running')} <span class="mono">Codex</span></div>
-        <div class="small"><span class="faint">服务器执行：</span><span class="mono">${esc(summary.capabilities?.executor || '—')}</span></div>
         <div class="small"><span class="faint">NPU：</span>${summary.capabilities?.npu === 'available' ? badge('可用', 'completed') : badge('不可用', 'pending')}</div>
         <div class="small"><span class="faint">Worker：</span>${worker.alive ? badge('在线', 'completed') : badge('离线', 'failed')}</div>
       </div>
@@ -1077,12 +1076,8 @@ async function renderConnections() {
       <div class="stack small">
         <div class="row-between"><span class="muted">NPU</span><span>${caps.npu?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} <span class="faint">${esc(caps.npu?.evidence || '')}</span></span></div>
         <div class="row-between"><span class="muted">CANN</span><span>${caps.cann?.available ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
-        <div class="row-between"><span class="muted">Docker</span><span>${caps.docker?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} ${caps.docker?.image_present ? '<span class="faint">image ready</span>' : ''}</span></div>
-        <div class="row-between"><span class="muted">隔离执行器</span><span class="mono">${esc(caps.executor?.selected || '—')} ${caps.executor?.network_enforced ? '（禁网）' : '（网络未强制隔离）'}</span></div>
-        <div class="row-between"><span class="muted">候选本地执行</span><span>${caps.candidate_execution?.status === 'available' ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
         <div class="row-between"><span class="muted">远端自定义测试</span><span class="mono">${caps.remote_custom_tests?.supported ? '已核实支持' : '未核实/禁用'}</span></div>
       </div>
-      ${caps.executor?.warning ? `<div class="alert warn small" style="margin-top:12px">${esc(caps.executor.warning)}</div>` : ''}
     </div>`;
 
   const platformForm = $('#platform-form');

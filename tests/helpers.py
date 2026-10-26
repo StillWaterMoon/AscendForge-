@@ -110,7 +110,6 @@ def make_settings(tmp: Path) -> Settings:
         setup_token="test-setup-token",
         admin_user="admin",
         admin_password="",
-        executor="local",
         worker_poll_seconds=0.2,
         lease_seconds=60,
     )

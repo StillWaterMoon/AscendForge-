@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 from ..config import Settings
-from .executor import DockerExecutor, ExecutorError, get_executor
 
 _CACHE: dict[str, tuple[float, dict]] = {}
 _TTL = 20.0
@@ -88,31 +87,6 @@ def _detect_cann() -> dict:
     }
 
 
-def _detect_docker(settings: Settings) -> dict:
-    docker = DockerExecutor(settings.tmp_dir, settings.executor_image)
-    if not shutil.which("docker"):
-        return {"available": False, "status": "unavailable", "evidence": "docker not on PATH"}
-    available = docker.available()
-    image = False
-    if available:
-        try:
-            result = subprocess.run(
-                [docker.docker, "image", "inspect", settings.executor_image],
-                capture_output=True,
-                timeout=5,
-            )
-            image = result.returncode == 0
-        except Exception:
-            image = False
-    return {
-        "available": available,
-        "status": "available" if available else "error",
-        "image": settings.executor_image,
-        "image_present": image,
-        "evidence": "docker info succeeded" if available else "docker info failed",
-    }
-
-
 def detect_capabilities(settings: Settings) -> dict:
     key = str(settings.data_dir)
     cached = _CACHE.get(key)
@@ -120,22 +94,6 @@ def detect_capabilities(settings: Settings) -> dict:
         return cached[1]
     npu = _detect_npu()
     cann = _detect_cann()
-    docker = _detect_docker(settings)
-    try:
-        executor = get_executor(settings)
-        executor_info = {
-            "selected": executor.name,
-            "network_enforced": bool(getattr(executor, "network_enforced", False)),
-        }
-        if executor.name == "local":
-            executor_info["warning"] = (
-                "local subprocess fallback: environment and filesystem are scoped, "
-                "but network isolation is not enforced; use Docker on the server"
-            )
-        if executor.name == "docker" and not docker.get("image_present"):
-            executor_info["warning"] = "docker image not present locally; first execution may fail"
-    except ExecutorError as exc:
-        executor_info = {"selected": None, "error": str(exc)}
     result = {
         "host": {
             "platform": sys.platform,
@@ -144,16 +102,6 @@ def detect_capabilities(settings: Settings) -> dict:
         },
         "npu": npu,
         "cann": cann,
-        "docker": docker,
-        "executor": executor_info,
-        "candidate_execution": {
-            "status": "available" if (npu["available"] and cann["available"] and executor_info.get("selected")) else "unavailable",
-            "reason": (
-                "NPU and CANN toolkit detected"
-                if npu["available"] and cann["available"]
-                else "no NPU/CANN on this server; Ascend C candidates cannot be executed locally"
-            ),
-        },
         "cpu_reference": {"status": "available", "note": "Python/C++ reference implementations can run on CPU"},
         "remote_custom_tests": {"status": "unknown", "supported": False},
         "remote_live_verified": {"status": "not_yet", "note": "CANNJudge submit/query await a live account test"},

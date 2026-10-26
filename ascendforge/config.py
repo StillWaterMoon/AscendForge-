@@ -81,12 +81,6 @@ class Settings:
     worker_poll_seconds: float = 1.0
     lease_seconds: int = 120
     log_level: str = "INFO"
-    executor: str = "auto"
-    executor_image: str = "python:3.12-slim"
-    executor_timeout: int = 30
-    executor_memory_mb: int = 512
-    executor_cpus: float = 1.0
-    executor_allow_network: bool = False
     # Optional fixed-test NPU evaluation backend used by MCP tools.
     # Disabled/empty means "not_configured", never a fabricated result.
     server_eval_enabled: bool = False
@@ -141,7 +135,6 @@ class Settings:
             "port": self.port,
             "secure_cookies": self.secure_cookies,
             "worker_id": self.worker_id,
-            "executor": self.executor,
             "cannjudge_base_url": self.cannjudge_base_url,
         }
 
@@ -171,12 +164,6 @@ class Settings:
             worker_poll_seconds=max(0.2, _env_float("ASCENDFORGE_WORKER_POLL_SECONDS", 1.0)),
             lease_seconds=max(30, _env_int("ASCENDFORGE_LEASE_SECONDS", 120)),
             log_level=_env_str("ASCENDFORGE_LOG_LEVEL", "INFO").upper(),
-            executor=_env_str("ASCENDFORGE_EXECUTOR", "auto").lower(),
-            executor_image=_env_str("ASCENDFORGE_EXECUTOR_IMAGE", "python:3.12-slim"),
-            executor_timeout=max(5, _env_int("ASCENDFORGE_EXECUTOR_TIMEOUT", 30)),
-            executor_memory_mb=max(128, _env_int("ASCENDFORGE_EXECUTOR_MEMORY_MB", 512)),
-            executor_cpus=max(0.25, _env_float("ASCENDFORGE_EXECUTOR_CPUS", 1.0)),
-            executor_allow_network=_env_bool("ASCENDFORGE_EXECUTOR_ALLOW_NETWORK", False),
             server_eval_enabled=_env_bool("ASCENDFORGE_SERVER_EVAL_ENABLED", False),
             server_eval_command=_env_str("ASCENDFORGE_SERVER_EVAL_COMMAND", ""),
             server_eval_timeout=max(30, _env_int("ASCENDFORGE_SERVER_EVAL_TIMEOUT", 900)),

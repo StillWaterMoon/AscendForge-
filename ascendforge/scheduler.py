@@ -27,7 +27,6 @@ from .experiments import (
     update_attempt,
     update_performance_best,
     update_remote_best,
-    usage_summary,
 )
 from .platform.base import PlatformError, SubmissionUnknown
 from .platform.service import PlatformService
@@ -124,7 +123,6 @@ class Scheduler:
         config = task.get("config_json") or {}
         if isinstance(config, str):
             config = json_loads(config, {})
-        usage = usage_summary(self.db, task["id"])
         attempts = int(self.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (task["id"],)) or 0)
         candidates = int(
             self.db.scalar(
@@ -157,54 +155,17 @@ class Scheduler:
             "inflight": self._inflight(),
             "last_send_at": self._last_send(),
             "runtime_sec": runtime,
-            "model_calls": usage["calls"],
-            "tokens": usage["total_tokens"],
-            "known_cost": usage["known_cost"],
-            "cost_complete": usage["cost_complete"],
-            "unknown_cost_calls": usage["unknown_cost_calls"],
             "limits": {
                 "max_attempts": config.get("max_attempts"),
                 "max_submissions_per_task": config.get("max_submissions_per_task"),
                 "max_submissions_per_day": config.get("max_submissions_per_day"),
                 "min_submit_interval_sec": config.get("min_submit_interval_sec"),
                 "max_inflight": config.get("max_inflight"),
-                "max_model_calls": config.get("max_model_calls"),
-                "max_tokens": config.get("max_tokens"),
-                "max_cost": config.get("max_cost"),
                 "max_runtime_sec": config.get("max_runtime_sec"),
                 "max_stall_rounds": config.get("max_stall_rounds"),
                 "target_score": config.get("target_score"),
             },
         }
-
-    def model_allowed(self, task: dict) -> Reservation:
-        config = task.get("config_json") or {}
-        if isinstance(config, str):
-            config = json_loads(config, {})
-        report = self.budget_report(task)
-        if task["status"] != TASK_RUNNING:
-            return Reservation(False, f"task_not_running:{task['status']}")
-        codex_mode = config.get("execution_mode") in ("cli", "codex")
-        if not codex_mode:
-            if report["candidates"] >= int(config.get("max_attempts") or 10**9):
-                return Reservation(False, "max_attempts")
-            if report["model_calls"] >= int(config.get("max_model_calls") or 10**9):
-                return Reservation(False, "max_model_calls")
-            if report["tokens"] >= int(config.get("max_tokens") or 10**9):
-                return Reservation(False, "max_tokens")
-            if report["runtime_sec"] > float(config.get("max_runtime_sec") or 10**9):
-                return Reservation(False, "max_runtime")
-            max_cost = config.get("max_cost")
-            if max_cost is not None:
-                if not report["cost_complete"]:
-                    return Reservation(
-                        False,
-                        "cost_unknown",
-                        detail={"message": "存在未配置价格的模型调用，无法把未知费用当作 0；请配置单价或移除 max_cost"},
-                    )
-                if float(report["known_cost"] or 0) >= float(max_cost):
-                    return Reservation(False, "max_cost")
-        return Reservation(True)
 
     # ------------------------------------------------------------------
     # Submission reservation
@@ -853,13 +814,6 @@ class Scheduler:
             reason = "max_submissions_reached"
         if reason is None and not codex_mode and report["runtime_sec"] > float(config.get("max_runtime_sec") or 10**9):
             reason = "max_runtime_reached"
-        if reason is None and not codex_mode and report["model_calls"] >= int(config.get("max_model_calls") or 10**9):
-            reason = "max_model_calls_reached"
-        if reason is None and not codex_mode and report["tokens"] >= int(config.get("max_tokens") or 10**9):
-            reason = "max_tokens_reached"
-        if reason is None and not codex_mode and config.get("max_cost") is not None and report["cost_complete"]:
-            if float(report["known_cost"] or 0) >= float(config["max_cost"]):
-                reason = "max_cost_reached"
         if reason is None and not codex_mode and self._stall_rounds(dict(task)) >= int(config.get("max_stall_rounds") or 10**9):
             reason = "stall_limit_reached"
         if reason:

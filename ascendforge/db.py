@@ -132,7 +132,6 @@ CREATE TABLE IF NOT EXISTS attempts (
     hypothesis TEXT,
     summary TEXT,
     snapshot_id TEXT,
-    generator_id TEXT,
     provider TEXT,
     model TEXT,
     prompt_version TEXT,
@@ -171,20 +170,6 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_task ON snapshots(task_id);
-
-CREATE TABLE IF NOT EXISTS generators (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    attempt_id TEXT,
-    generator_snapshot_id TEXT,
-    reference_snapshot_id TEXT,
-    seed INTEGER,
-    spec_json TEXT,
-    validation_json TEXT,
-    last_validation_json TEXT,
-    created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_generators_task ON generators(task_id);
 
 CREATE TABLE IF NOT EXISTS submissions (
     id TEXT PRIMARY KEY,
@@ -257,24 +242,6 @@ CREATE TABLE IF NOT EXISTS cli_runs (
     finished_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_cli_runs_task ON cli_runs(task_id, started_at);
-
-CREATE TABLE IF NOT EXISTS model_calls (
-    id TEXT PRIMARY KEY,
-    task_id TEXT,
-    attempt_id TEXT,
-    provider TEXT,
-    model TEXT,
-    prompt_tokens INTEGER NOT NULL DEFAULT 0,
-    completion_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    cost_estimate REAL,
-    cost_known INTEGER NOT NULL DEFAULT 0,
-    duration_ms INTEGER,
-    ok INTEGER NOT NULL DEFAULT 1,
-    error_code TEXT,
-    created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_model_calls_task ON model_calls(task_id, created_at);
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

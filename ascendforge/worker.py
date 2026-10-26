@@ -60,7 +60,7 @@ class Worker:
                 "worker_id": self.settings.worker_id,
                 "state": state,
                 "at": now(),
-                "platform": detect_capabilities(self.settings).get("candidate_execution"),
+                "npu": detect_capabilities(self.settings).get("npu", {}).get("status"),
             },
         )
 

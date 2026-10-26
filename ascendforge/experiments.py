@@ -233,7 +233,6 @@ ATTEMPT_PATCH_FIELDS = {
     "hypothesis",
     "summary",
     "snapshot_id",
-    "generator_id",
     "provider",
     "model",
     "result_json",
@@ -241,9 +240,6 @@ ATTEMPT_PATCH_FIELDS = {
     "local_validation_json",
     "error_code",
     "error_message",
-    "prompt_tokens",
-    "completion_tokens",
-    "cost_estimate",
     "step_count",
     "finished_at",
     "parent_attempt_id",
@@ -796,70 +792,6 @@ def update_local_best(db: Database, task_id: str, attempt_id: str | None, valida
 
 
 # ---------------------------------------------------------------------------
-# Model usage
-# ---------------------------------------------------------------------------
-
-
-def record_model_call(
-    db: Database,
-    *,
-    task_id: str | None,
-    attempt_id: str | None,
-    provider: str,
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    cost_estimate: float | None,
-    cost_known: bool,
-    duration_ms: int,
-    ok: bool,
-    error_code: str | None = None,
-) -> None:
-    db.insert(
-        "INSERT INTO model_calls(id, task_id, attempt_id, provider, model, prompt_tokens, "
-        "completion_tokens, total_tokens, cost_estimate, cost_known, duration_ms, ok, error_code, created_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            new_id("call"),
-            task_id,
-            attempt_id,
-            provider,
-            model,
-            int(prompt_tokens),
-            int(completion_tokens),
-            int(prompt_tokens) + int(completion_tokens),
-            cost_estimate,
-            1 if cost_known else 0,
-            int(duration_ms),
-            1 if ok else 0,
-            error_code,
-            now(),
-        ),
-    )
-
-
-def usage_summary(db: Database, task_id: str) -> dict:
-    row = db.query_one(
-        "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, "
-        "COALESCE(SUM(completion_tokens),0) AS completion_tokens, "
-        "COALESCE(SUM(total_tokens),0) AS total_tokens, "
-        "SUM(CASE WHEN cost_known=1 THEN cost_estimate ELSE 0 END) AS known_cost, "
-        "SUM(CASE WHEN cost_known=0 THEN 1 ELSE 0 END) AS unknown_cost_calls "
-        "FROM model_calls WHERE task_id=?",
-        (task_id,),
-    ) or {}
-    return {
-        "calls": int(row.get("calls") or 0),
-        "prompt_tokens": int(row.get("prompt_tokens") or 0),
-        "completion_tokens": int(row.get("completion_tokens") or 0),
-        "total_tokens": int(row.get("total_tokens") or 0),
-        "known_cost": row.get("known_cost"),
-        "unknown_cost_calls": int(row.get("unknown_cost_calls") or 0),
-        "cost_complete": int(row.get("unknown_cost_calls") or 0) == 0,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 
@@ -886,9 +818,7 @@ def build_task_archive(
             raise ValueError("task not found")
         attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts WHERE task_id=? ORDER BY ordinal", (task_id,))]
         snapshots = [dict(r) for r in conn.execute("SELECT * FROM snapshots WHERE task_id=?", (task_id,))]
-        generators = [dict(r) for r in conn.execute("SELECT * FROM generators WHERE task_id=?", (task_id,))]
         submissions = [dict(r) for r in conn.execute("SELECT * FROM submissions WHERE task_id=?", (task_id,))]
-        model_calls = [dict(r) for r in conn.execute("SELECT * FROM model_calls WHERE task_id=?", (task_id,))]
         events = [dict(r) for r in conn.execute("SELECT * FROM events WHERE task_id=?", (task_id,))]
     task_dict = dict(task)
     for key in ("problem_json", "template_json", "config_json", "best_metric_json", "local_best_json"):
@@ -900,10 +830,6 @@ def build_task_archive(
                 row[key] = json_loads(row[key], row[key])
     for row in snapshots:
         row["files_json"] = json_loads(row["files_json"], [])
-    for row in generators:
-        for key in ("spec_json", "validation_json"):
-            if row.get(key):
-                row[key] = json_loads(row[key], row[key])
     for row in submissions:
         if row.get("response_json"):
             row["response_json"] = json_loads(row["response_json"], row["response_json"])
@@ -918,13 +844,10 @@ def build_task_archive(
         "task": task_dict,
         "attempts": attempts,
         "snapshots": snapshots,
-        "generators": generators,
         "submissions": submissions,
-        "model_calls": model_calls,
         "events": events,
         "included": {
             "source_snapshots": True,
-            "generator_snapshots": True,
             "problem_metadata": True,
             "problem_package": include_problem_package,
             "actual_generated_data_bytes": False,
@@ -976,12 +899,6 @@ def build_task_archive(
                 zf,
                 f"snapshots/{snapshot['id']}/manifest.json",
                 json_dumps(bundle["manifest"], pretty=True).encode("utf-8"),
-            )
-        for generator in generators:
-            add_bytes(
-                zf,
-                f"generators/{generator['id']}.json",
-                json_dumps(generator, pretty=True).encode("utf-8"),
             )
         problem_json = task_dict.get("problem_json")
         template_json = task_dict.get("template_json")

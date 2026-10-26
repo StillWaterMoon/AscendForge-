@@ -20,7 +20,6 @@ from .experiments import (
     attempt_history,
     current_attempt,
     task_path,
-    usage_summary,
 )
 from .platform.base import PlatformError
 from .platform.cannjudge import CannjudgeAdapter
@@ -60,9 +59,6 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "max_submissions_per_day": 20,
     "min_submit_interval_sec": 300,
     "max_inflight": 1,
-    "max_model_calls": 120,
-    "max_tokens": 3_000_000,
-    "max_cost": None,
     "max_runtime_sec": 6 * 3600,
     "max_stall_rounds": 5,
     "max_attempts": 30,
@@ -261,8 +257,6 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
     optional_limit("max_submissions_per_day", 200)
     integer("min_submit_interval_sec", 60, 86400)
     integer("max_inflight", 1, 3)
-    optional_limit("max_model_calls", 5000)
-    optional_limit("max_tokens", 200_000_000)
     integer("max_runtime_sec", 60, 7 * 86400)
     integer("max_stall_rounds", 1, 100)
     integer("max_attempts", 1, 500)
@@ -274,13 +268,6 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
         raise TaskError("API_MODE_REMOVED", "LLM API 执行模式已移除；任务必须使用本地 CLI")
     config["execution_mode"] = mode
 
-    if config["max_cost"] is not None:
-        try:
-            config["max_cost"] = float(config["max_cost"])
-        except (TypeError, ValueError):
-            raise TaskError("BAD_CONFIG", "max_cost 必须是数字或留空") from None
-        if config["max_cost"] < 0:
-            raise TaskError("BAD_CONFIG", "max_cost 不能为负")
     if config["target_score"] is not None:
         try:
             config["target_score"] = float(config["target_score"])
@@ -457,7 +444,6 @@ class TaskService:
             "next_action_at": task["next_action_at"],
             "attempts": attempts,
             "submissions": submissions,
-            "usage": usage_summary(self.db, task_id),
             "current_attempt": current_attempt(self.db, task_id),
             "counts": {
                 "attempts": len(attempts),
@@ -910,8 +896,6 @@ class TaskService:
                 "events",
                 "evaluations",
                 "submissions",
-                "generators",
-                "model_calls",
                 "cli_runs",
                 "snapshots",
                 "experiments",

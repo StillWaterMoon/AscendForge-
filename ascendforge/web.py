@@ -186,8 +186,7 @@ class App:
             },
             "capabilities": {
                 "npu": capabilities.get("npu", {}).get("status"),
-                "candidate_execution": capabilities.get("candidate_execution", {}).get("status"),
-                "executor": capabilities.get("executor", {}).get("selected"),
+                "cann": capabilities.get("cann", {}).get("status"),
                 "remote_custom_tests": capabilities.get("remote_custom_tests", {}).get("supported"),
             },
             "next_submit_hint": "见任务详情中的调度额度",

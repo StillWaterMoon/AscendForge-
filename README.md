@@ -2,48 +2,24 @@
 
 Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CANNJudge**。
 
-服务器托管优化循环、模型调用、调度、实验存储和提交；本地主机只需要浏览器。关闭网页、电脑关机或 Web 服务重启都不会丢失任务，后台 worker 会从持久化状态恢复。
+服务器托管 CLI 会话、调度、提交、实验结果和持久化状态；本地主机只需要浏览器。关闭网页、电脑关机或 Web 服务重启都不会丢失任务。
 
 > **当前验证状态（2026-10-22）**
 >
 > - CANNJudge 的公开题目解析、模板读取、ZIP 工程下载已在本机**真实联网验证**。
 > - **真实登录、题目导入、真实提交、远端 ID、结果查询与独立读回已完成**。模板基线曾返回 `Runtime Error`（15/15），**不代表算子通过**。
-> - **2026-10-22 Agent 在 CopySign 取得真实 `15/15 Pass`**：attempt 24，remote id `6ad99b643ff2fef7e806c2f4`，`precision_ratio=1.0`，best 已写入；任务以 `agent_finished:target_reached` 正常结束。
-> - 早期迭代保留用于诊断：3 次编译错误 + 1 次 `Wrong Answer`。详见 [Agent 编译错误诊断](docs/agent-compile-diagnosis.md)。
+> - 历史测试任务和证据已清空；当前只保留 admin 账号与 CANNJudge 连接。
+> - 本地 Codex CLI 已跑通“工作区修改 → 快照 → 官方提交 → 会话恢复”。
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 89 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
-
-## 界面预览
-
-本机 headless Chrome 实际截图（演示数据；非真实 CANNJudge 提交）。
-
-2026-10-22 视觉刷新：暖白纸感浅色主题、任务卡片、逐测试点结果。
-
-品牌标识：
-
-![AscendForge logo](docs/screenshots/logo-preview.png)
-
-![任务面板](docs/screenshots/ui-refresh-dashboard.png)
-
-![任务详情](docs/screenshots/ui-refresh-task.png)
-
-![逐测试点结果](docs/screenshots/ui-refresh-testcases.png)
-
-旧版截图：
-
-![旧版任务面板](docs/screenshots/dashboard.png)
-
-![旧版尝试记录与源码](docs/screenshots/attempt-source.png)
-
-![旧版版本 diff](docs/screenshots/attempt-diff.png)
+> - 84 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 
 ## 为什么是这个形态
 
 - **单用户、单服务器**：Python 标准库 + SQLite + 独立 worker，部署简单，故障面小。
-- **浏览器只是控制面**：开始/暂停/恢复/停止只是写入意图；模型调用、提交、轮询都在服务器 worker 里。
-- **凭据与模型上下文隔离**：模型只看到题目、源码和历史；API key、CANNJudge Cookie 只存在于加密凭据存储中。
+- **浏览器只是控制面**：开始/暂停/恢复/停止只是写入意图；代码修改、提交和轮询都在服务器侧的本地 CLI 与 worker 完成。
+- **凭据隔离**：Codex 使用自己的认证；CANNJudge Cookie 只存在于 AscendForge 的加密凭据存储中。
 - **保守的提交语义**：先落盘不可变快照，再提交完全相同的字节；超时/响应丢失进入 `submission_unknown`，先对账，绝不自动重发。
 - **诚实的设备状态**：无 NPU 时只运行数据生成器和 CPU 参考实现，候选状态为 `untested`。
 
@@ -53,7 +29,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 
 - Python **3.11+**
 - 唯一运行时依赖：`cryptography`（凭据加密）
-- 推荐：Linux 服务器 + Docker（用于隔离执行生成代码）+ 反向代理 HTTPS
+- 推荐：Linux 服务器 + 反向代理 HTTPS；Codex CLI 直接使用任务 workspace
 
 ```bash
 python3 -m venv .venv
@@ -131,12 +107,11 @@ ascendforge/
     change_audit.py      有效改动审计
     preflight.py         提交前源码检查
   execution/
-    executor.py          Docker / 本地子进程隔离执行
-    capabilities.py      NPU/CANN/Docker 诚实检测
+    capabilities.py      NPU/CANN 诚实检测
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
   cli.py, db.py, states.py
 skills/                  CLI 启动 skill
-tests/                   89 个 unittest
+tests/                   84 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -151,7 +126,6 @@ CLI 启动时注入：
 - 覆盖范围：`all_passed` 要求声明的预期测试点全部完成且通过；只有部分返回时记为 `testset_passed`/`current_testset_only`，不冒充完整通过
 - 可比性：性能结果带 `comparison_key`（题目版本、测试点集合、CANN/SoC、时间单位和环境指纹）；不同 key 的耗时不会混入同一个 performance best
 - 兼容层：`evaluations` 表、revision 的 config/edit_mode 字段已预留；真实 patch、参数评测和去重仍在下一阶段
-- 通用闭环：阶段、责任边界、已验证场景和剩余缺口见 [通用优化闭环](docs/general-optimization-loop.md)；参数扫描是可选执行器，不是所有实验的固定形式
 - CLI Agent 迁移：能力核查与阻塞项见 [CLI Agent 能力核查](docs/cli-agent-capability-audit.md)；当前 Codex CLI 可用，DeepSeek CLI 未安装，尚未切换到 CLI 执行循环
 - 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“继续任务”恢复同一会话
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
@@ -159,7 +133,6 @@ CLI 启动时注入：
 - 执行模式：只保留本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入
 - 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace 和日志；running 或存在未知/发送中提交时拒绝删除，审计日志保留
 - Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
-- Codex 真实闭环：已在本机对 CopySign 跑通一轮（工作区修改 → snapshot → 官方提交 → 15/15 Pass → 会话/usage 记录）；结果与限制见 [Codex 真实闭环](docs/attempts/codex-loop-real-round.md)
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值
@@ -190,7 +163,7 @@ $ASCENDFORGE_DATA_DIR/
 | Web 服务重启 | worker 不受影响；状态全在 SQLite/磁盘 |
 | worker 崩溃 | 重启后 `submitting` 超租约的提交标记 `unknown`，先对账 |
 | 提交超时/无 submissionId | `submission_unknown` + `needs_review`，冻结新提交，等待对账 |
-| 暂停 | 禁止新模型调用/执行/提交；已发出的提交继续收集结果 |
+| 暂停 | 禁止新的 CLI turn 和提交；已发出的提交继续收集结果 |
 | 停止 | 不撤销远端已接受提交；取消尚未发送的排队提交 |
 | 401/403 | 进入 `needs_login`/`needs_review`，不盲目重试 |
 | 429 | 遵守 `Retry-After`，有上限退避 |
@@ -202,8 +175,8 @@ $ASCENDFORGE_DATA_DIR/
 ## 安全边界
 
 - 密码 scrypt（每用户盐）；会话令牌只在 DB 存 SHA-256。
-- 模型 key 与 CANNJudge Cookie 用 Fernet 加密，密钥在数据库之外；浏览器只看到掩码。
-- 生成代码在独立子进程或 Docker 中执行：临时工作目录、最小环境、输出/时间/内存限制；Docker 模式禁网。**本地子进程回退不能强制禁网**，能力页会明确提示，服务器推荐 Docker。
+- CANNJudge Cookie 用 Fernet 加密，密钥在数据库之外；浏览器只看到掩码。
+- Codex 在任务 workspace 内修改代码；AscendForge 不再内置 Docker/Local executor。
 - 导出档案默认排除凭据/会话/日志。
 - 远程访问必须经 HTTPS 反向代理，并设置 `ASCENDFORGE_SECURE_COOKIES=true`。
 
@@ -215,24 +188,18 @@ $ASCENDFORGE_DATA_DIR/
 PYTHONPATH=. python -m unittest discover -s tests -t . -v
 ```
 
-覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、CSRF/幂等、凭据掩码、档案排除密钥、隔离执行器超时/输出上限/环境清洗、CANNJudge 提交载荷校验、任务状态机与 skills 加载、Codex 会话暂停/继续、CLI 运行器预留、提交 401/403/429/unknown 异常分支。
+覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、CSRF/幂等、凭据掩码、档案排除密钥、CANNJudge 提交载荷校验、任务状态机与 skills 加载、Codex 会话暂停/继续、CLI 运行器预留、提交 401/403/429/unknown 异常分支。
 
 ## 尚未验证 / 需要你完成
 
 1. **真实可通过的算子实现**：阶段 1 已用模板基线打通“提交—结果”链路，但基线是模板，返回 `Runtime Error`；还需要真实实现并拿到 `Pass`。
-2. **真实模型 Agent 两轮优化**：需要你提供中转站 base_url、key、模型名；不同网关对 `tools` 字段、JSON 输出和计费字段的兼容性需要实测。
-3. **服务器**：HiDevLab 950 审批下来后，部署 `serve` + `worker`，确认 Docker/CANN/NPU 能力；无 NPU 的开发机不能替代。
-4. **HTTPS/域名**：远程访问前配置反向代理与 `ASCENDFORGE_SECURE_COOKIES=true`。
+2. **服务器**：HiDevLab 950 审批下来后，部署 `serve` + `worker`，确认 CANN/NPU 能力；无 NPU 的开发机不能替代。
+3. **HTTPS/域名**：远程访问前配置反向代理与 `ASCENDFORGE_SECURE_COOKIES=true`。
 
 ## 文档
 
 - [架构与状态机](docs/architecture.md)
-- [CANNJudge 能力矩阵与证据](docs/capability-matrix.md)
-- [阶段 0 真实探测报告](docs/phase0-report.md)
-- [阶段 1 真实提交报告](docs/stage1-report.md)
-- [Agent 编译错误诊断](docs/agent-compile-diagnosis.md)
-- [阶段 1 证据 JSON](docs/evidence/stage1-2026-10-21.json)
 - [部署与运维](docs/operations.md)
 - [安全模型](docs/security.md)
-- [验收清单](docs/acceptance.md)
-- [Agent 工具协议](docs/protocol.md)
+- [项目模板](docs/project-template.md)
+- [MCP 工具](docs/mcp-tools.md)

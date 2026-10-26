@@ -3,13 +3,13 @@
 ## 1. 服务器要求
 
 - Linux x86_64/ARM64，Python 3.11+
-- 持久磁盘：数据库、题目包、源码快照、生成数据、备份
-- 可选但推荐：Docker Engine（隔离执行生成代码）
+- 持久磁盘：数据库、题目包、源码快照
 - 可选：NPU + CANN（没有也能运行，只是候选 untested）
+- 本地 Codex CLI（服务器上安装并完成认证）
 - 反向代理/证书：Caddy 或 Nginx（远程访问必须 HTTPS）
 - 进程管理：systemd 或容器编排；**不要**用 SSH 会话前台运行
 
-单用户规模建议：2 vCPU / 4 GB RAM / 40 GB 磁盘起；题目包和快照通常很小，生成数据上限受执行器限制。
+单用户规模建议：2 vCPU / 4 GB RAM / 40 GB 磁盘起；题目包和快照通常很小。
 
 ## 2. 安装（systemd，推荐）
 
@@ -39,8 +39,6 @@ ASCENDFORGE_DATA_DIR=/var/lib/ascendforge
 ASCENDFORGE_HOST=127.0.0.1
 ASCENDFORGE_PORT=8080
 ASCENDFORGE_SECURE_COOKIES=true
-ASCENDFORGE_EXECUTOR=docker
-ASCENDFORGE_EXECUTOR_IMAGE=python:3.12-slim
 ```
 
 初始化管理员：
@@ -61,16 +59,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ascendforge-web ascendforge-worker
 sudo systemctl status ascendforge-web ascendforge-worker
 ```
-
-如果 worker 使用 Docker 执行器，把 `ascendforge` 加入 docker 组（或使用 rootless Docker），并确认 `docker info` 对该用户可用：
-
-```bash
-sudo usermod -aG docker ascendforge
-sudo systemctl restart ascendforge-worker
-sudo -u ascendforge docker info
-```
-
-> Docker socket 等价于宿主机 root 权限。只应在受控服务器上这样做；不要把它暴露给 Web 进程。
 
 ## 3. HTTPS 反向代理
 
@@ -109,9 +97,8 @@ docker compose -f deploy/docker-compose.yml logs -f
 ```
 
 - `web` 与 `worker` 共享 `ascendforge-data` 卷；删除容器不会删除卷。
-- compose 默认 `ASCENDFORGE_EXECUTOR=local`，因为容器内再调 Docker 需要挂载 socket，风险较高。
-- 生产建议：**Web/worker 用 systemd 跑在宿主机，worker 用 Docker 执行器**；或者单独一台执行节点。
-- 如果坚持在容器内用 Docker 执行器，必须显式挂载 `/var/run/docker.sock` 并接受其 root 等价权限；本项目默认不这么做。
+- Codex CLI 需要安装在宿主机并完成认证；容器部署只运行 AscendForge Web/worker。
+- 生产建议：Web/worker 用 systemd 跑在宿主机，Codex 使用同一用户的本地 CLI。
 
 ## 5. 备份与恢复
 
@@ -121,12 +108,11 @@ Web 任务详情 → “导出档案”。包含：
 
 - 任务、attempt、父子关系、配置、预算
 - 不可变源码快照 + 每文件 SHA-256
-- 生成器/参考实现快照、种子、规格
 - 远端提交记录、原始结果、归一化结果
-- 事件、模型用量
+- 事件
 - `SHA256SUMS`
 
-默认排除：模型 key、CANNJudge Cookie、AscendForge 会话、日志。大体积生成数据默认不包含。
+默认排除：CANNJudge Cookie、AscendForge 会话、日志。
 
 > 服务器灾备备份功能已移除；仍需保留任务档案导出、数据库与磁盘快照。升级或迁移前请自行备份 `$DATA_DIR` 与 `secrets/master.key`。
 
@@ -149,7 +135,7 @@ sudo systemctl start ascendforge-web ascendforge-worker
 - 日志：`$DATA_DIR/logs/ascendforge.log`，10 MB 轮转，保留 5 份。
 - 健康检查：`GET /api/health`（无需登录）。
 - Worker 心跳：`GET /api/worker`，或任务详情页右上角状态。
-- 关键事件：任务详情“事件”时间线（创建、快照、排队、发送、受理、结果、best、错误、暂停/恢复）。
+- 关键事件：`events` 表（创建、快照、排队、发送、受理、结果、best、错误、暂停/恢复）。
 - 建议监控：
   - web/worker systemd active
   - `/api/health` 200
@@ -168,17 +154,16 @@ sudo systemctl start ascendforge-web ascendforge-worker
 | 一直 `needs_review` | 有 unknown 提交；在“提交与反馈”对账/人工确认 |
 | 提交被限频 | 查看任务详情的“下一次提交”；不要绕过调度器 |
 | 403 提交 | 题目/小组权限或比赛关闭；平台拒绝，不自动重试 |
-| 模型 401/429 | 检查中转站 key/额度；任务进入 needs_review/退避 |
-| 执行器不可用 | `ASCENDFORGE_EXECUTOR=docker` 时检查 Docker、镜像、权限；或临时 local（弱隔离） |
+| Codex 启动失败 | 检查 `codex --version`、登录状态和任务日志；任务会暂停而不是假装运行 |
 | 无 NPU | 正常；候选会标 `unavailable/untested`，不是错误 |
-| 备份恢复后凭据失效 | 主密钥未包含或与备份不匹配；重新连接平台/模型 |
+| 主密钥不匹配 | 重新连接 CANNJudge |
 | 端口冲突 | `ss -lntp`；改 `ASCENDFORGE_PORT` |
 
 ## 9. 安全运营
 
 - 立即修改初始密码；不要多人共享管理员。
-- 定期轮换模型 key；CANNJudge 会话过期后重新登录。
+- CANNJudge 会话过期后重新登录。
 - 不要把 `data/` 放进公开静态目录或 git。
-- 备份与主密钥分开保存；含密钥的备份按明文凭据管理。
+- 自行备份 `$DATA_DIR` 与 `secrets/master.key`，两者分开保存。
 - 只开放 443；SSH 限制来源；保持系统与依赖更新。
-- 发现异常提交/费用：暂停任务、断开平台、轮换 key、检查事件与审计日志。
+- 发现异常提交：暂停任务、断开平台、检查事件与审计日志。

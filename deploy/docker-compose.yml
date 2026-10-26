@@ -37,10 +37,6 @@ services:
       - ../.env
     environment:
       ASCENDFORGE_DATA_DIR: /var/lib/ascendforge
-      # The default compose worker cannot use Docker-in-Docker.  For production,
-      # run the worker on the host (systemd) with ASCENDFORGE_EXECUTOR=docker,
-      # or provide a dedicated isolated executor node.
-      ASCENDFORGE_EXECUTOR: local
     volumes:
       - ascendforge-data:/var/lib/ascendforge
     depends_on:
