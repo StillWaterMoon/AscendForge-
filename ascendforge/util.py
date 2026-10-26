@@ -11,7 +11,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any
 
 TZ_NAME = "Asia/Shanghai"
 
@@ -60,12 +60,6 @@ def sha256_text(text: str) -> str:
     return sha256_bytes(text.encode("utf-8"))
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def hmac_digest(key: bytes, data: bytes) -> str:
@@ -124,67 +118,14 @@ def safe_relpath(rel: str) -> str:
     return str(p)
 
 
-def resolve_under(root: Path, rel: str) -> Path:
-    rel = safe_relpath(rel)
-    target = (root / rel).resolve()
-    root_resolved = root.resolve()
-    if target != root_resolved and root_resolved not in target.parents:
-        raise ValueError("path escapes root")
-    return target
 
 
-def ensure_relative_within(root: Path, path: Path) -> Path:
-    root = root.resolve()
-    path = path.resolve()
-    if path != root and root not in path.parents:
-        raise ValueError("path escapes root")
-    return path
 
 
-def redact(value: str | None, keep: int = 4) -> str:
-    if not value:
-        return "(unset)"
-    if len(value) <= keep * 2:
-        return "*" * len(value)
-    return value[:keep] + "*" * max(4, len(value) - keep * 2) + value[-keep:]
 
 
-def parse_size(text: str) -> int:
-    match = re.fullmatch(r"\s*(\d+)\s*([kmgt]?i?b?)?\s*", text or "", re.I)
-    if not match:
-        raise ValueError("invalid size")
-    number = int(match.group(1))
-    unit = (match.group(2) or "").lower()
-    factors = {
-        "": 1,
-        "b": 1,
-        "k": 1024,
-        "kb": 1024,
-        "ki": 1024,
-        "kib": 1024,
-        "m": 1024**2,
-        "mb": 1024**2,
-        "mi": 1024**2,
-        "mib": 1024**2,
-        "g": 1024**3,
-        "gb": 1024**3,
-        "gi": 1024**3,
-        "gib": 1024**3,
-    }
-    if unit not in factors:
-        raise ValueError("invalid size unit")
-    return number * factors[unit]
 
 
-def human_bytes(num: int | float | None) -> str:
-    if num is None:
-        return "?"
-    value = float(num)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if abs(value) < 1024 or unit == "TiB":
-            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} TiB"
 
 
 def shanghai_day(ts: float | None = None) -> str:
@@ -241,12 +182,3 @@ def stable_hash_files(files: dict[str, str]) -> tuple[str, list[dict]]:
     return aggregate, manifest
 
 
-def iter_chunks(iterable: Iterable[bytes], size: int = 1024 * 1024):
-    buf = bytearray()
-    for chunk in iterable:
-        buf.extend(chunk)
-        while len(buf) >= size:
-            yield bytes(buf[:size])
-            del buf[:size]
-    if buf:
-        yield bytes(buf)

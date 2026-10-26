@@ -16,8 +16,8 @@ from .config import Settings
 from .db import Database
 from .execution.capabilities import detect_capabilities
 from .logging_setup import configure_logging
-from .security import CredentialStore, SecretBox, hash_password, load_master_key
-from .util import json_dumps, new_id, now, sha256_file
+from .security import hash_password
+from .util import json_dumps, new_id, now
 
 
 def _settings(args) -> Settings:
@@ -40,8 +40,6 @@ def cmd_init(args) -> int:
     settings = _settings(args)
     db = Database(settings.db_path)
     db.init()
-    box = SecretBox(load_master_key(settings.key_file, os.environ.get("ASCENDFORGE_SECRET_KEY", "")))
-    credentials = CredentialStore(db, box)
     count = int(db.scalar("SELECT COUNT(*) FROM users") or 0)
     if count and not args.force:
         print(f"已存在 {count} 个用户；使用 --force 创建另一个管理员。")

@@ -14,7 +14,6 @@ import time
 from .config import Settings
 from .db import Database
 from .execution.capabilities import detect_capabilities
-from .experiments import add_event
 from .platform.service import PlatformService
 from .scheduler import Scheduler
 from .security import CredentialStore, SecretBox, load_master_key, purge_expired_sessions

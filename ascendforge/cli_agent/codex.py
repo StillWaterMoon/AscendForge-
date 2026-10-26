@@ -13,7 +13,6 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from .probe import codex_resume_command, codex_start_command, probe_codex
 

@@ -10,7 +10,6 @@ it.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from .config import Settings
@@ -18,7 +17,6 @@ from .db import Database
 from .experiment_service import note_result, set_working_revision
 from .experiments import (
     add_event,
-    attempt_history,
     comparison_key,
     expected_testcases,
     get_attempt,

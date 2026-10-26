@@ -25,8 +25,6 @@ from .platform.base import PlatformError
 from .platform.cannjudge import CannjudgeAdapter
 from .platform.service import PlatformService
 from .states import (
-    ATTEMPT_QUEUED,
-    ATTEMPT_SUBMISSION_UNKNOWN,
     TASK_COMPLETED,
     TASK_FAILED,
     TASK_NEEDS_LOGIN,
@@ -216,9 +214,6 @@ def _probe_process(pid: object) -> dict:
         return result("unknown", "kill(0)", str(exc))
 
 
-def _pid_alive(pid: object) -> bool:
-    """Compatibility wrapper; only a positive probe counts as alive."""
-    return _probe_process(pid)["state"] == "alive"
 
 
 def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:

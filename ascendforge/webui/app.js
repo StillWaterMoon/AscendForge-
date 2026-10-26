@@ -84,14 +84,6 @@ function fmtTime(ts) {
   return d.toLocaleString('zh-CN', { hour12: false });
 }
 
-function fmtDuration(sec) {
-  if (sec === null || sec === undefined) return '—';
-  sec = Math.max(0, Math.round(sec));
-  if (sec < 60) return `${sec}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
-}
-
 function fmtBytes(n) {
   if (n === null || n === undefined) return '—';
   if (n < 1024) return `${n} B`;
@@ -862,14 +854,6 @@ async function continueTask(taskId) {
   }
 }
 
-function formatCost(value) {
-  if (value === null || value === undefined) return '未知';
-  return Number(value).toFixed(6);
-}
-
-/* ------------------------------------------------------------------ */
-/* Attempt modal                                                       */
-/* ------------------------------------------------------------------ */
 async function openAttempt(taskId, attemptId) {
   state.attemptTab = 'source';
   try {

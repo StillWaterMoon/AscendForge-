@@ -23,7 +23,7 @@ class ExperimentServiceTests(unittest.TestCase):
         task = seed_task(env, status="running")
         first = seed_attempt(env, task, source="// v1")
         second = seed_attempt(env, task, parent=first["id"], source="// v2")
-        third = seed_attempt(env, task, parent=second["id"], source="// v3")
+        seed_attempt(env, task, parent=second["id"], source="// v3")
         env.db.execute(
             "UPDATE tasks SET best_attempt_id=?, best_metric_json=? WHERE id=?",
             (second["id"], "{}", task["id"]),

@@ -154,8 +154,6 @@ def ensure_active(db: Database, task_id: str) -> dict:
     return db.query_one("SELECT * FROM experiments WHERE id=?", (experiment_id,))
 
 
-def attach_attempt(db: Database, experiment_id: str, attempt_id: str) -> None:
-    db.execute("UPDATE attempts SET experiment_id=? WHERE id=?", (experiment_id, attempt_id))
 
 
 def set_working_revision(db: Database, experiment_id: str, attempt_id: str) -> None:
@@ -219,48 +217,6 @@ def finish_experiment(
     )
 
 
-def update_plan(
-    db: Database,
-    experiment_id: str,
-    *,
-    hypothesis: str | None = None,
-    search_space: Any = None,
-    success_criteria: Any = None,
-    budget: Any = None,
-) -> dict:
-    experiment = db.query_one("SELECT * FROM experiments WHERE id=?", (experiment_id,))
-    if not experiment:
-        raise KeyError(f"experiment not found: {experiment_id}")
-    fields = []
-    values: list[Any] = []
-    if hypothesis is not None:
-        text = str(hypothesis).strip()
-        if not text:
-            raise ValueError("hypothesis cannot be empty")
-        fields.append("hypothesis=?")
-        values.append(text[:8000])
-    for name, value in (
-        ("search_space_json", search_space),
-        ("success_criteria_json", success_criteria),
-        ("budget_json", budget),
-    ):
-        if value is not None:
-            fields.append(f"{name}=?")
-            values.append(json_dumps(value))
-    if not fields:
-        return experiment
-    fields.append("updated_at=?")
-    values.append(now())
-    values.append(experiment_id)
-    db.execute(f"UPDATE experiments SET {', '.join(fields)} WHERE id=?", tuple(values))
-    add_event(
-        db,
-        experiment["task_id"],
-        None,
-        "experiment_plan_updated",
-        {"experiment_id": experiment_id, "fields": [field.split("=")[0] for field in fields if field != "updated_at=?"]},
-    )
-    return db.query_one("SELECT * FROM experiments WHERE id=?", (experiment_id,))
 
 
 def start_experiment(

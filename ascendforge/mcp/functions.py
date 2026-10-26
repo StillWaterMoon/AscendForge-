@@ -25,7 +25,7 @@ from ..platform.service import PlatformService
 from ..scheduler import Scheduler
 from ..security import CredentialStore, SecretBox, load_master_key
 from ..tasks import TaskService
-from ..util import json_dumps, json_loads, new_id, now, safe_relpath
+from ..util import json_loads, now, safe_relpath
 from .contracts import TOOL_NAMES, ToolArgumentError, validate_arguments
 from .server_eval import ServerEvaluationError, ServerEvaluationService
 

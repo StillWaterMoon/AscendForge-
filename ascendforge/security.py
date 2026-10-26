@@ -20,9 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import __version__
 from .db import Database
-from .util import hmac_digest, new_id, now, redact
+from .util import hmac_digest, new_id, now
 
 try:  # cryptography is the only runtime dependency
     from cryptography.fernet import Fernet, InvalidToken
@@ -295,5 +294,3 @@ class LoginThrottle:
             self._events.pop(key, None)
 
 
-def app_version() -> str:
-    return __version__

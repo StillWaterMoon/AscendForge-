@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import json
 import os
 import shutil
 import tempfile
@@ -21,7 +20,6 @@ from typing import Any
 from .config import Settings
 from .db import Database
 from .states import (
-    ATTEMPT_FINISHED,
     OUTCOME_COMPILE_ERROR,
     OUTCOME_FAILED,
     OUTCOME_PASSED,
@@ -40,10 +38,7 @@ from .util import (
     now,
     safe_relpath,
     sha256_bytes,
-    sha256_file,
-    sha256_text,
     stable_hash_files,
-    write_text,
 )
 
 MAX_SNAPSHOT_FILES = 256
@@ -173,8 +168,6 @@ def read_snapshot(db: Database, settings: Settings, snapshot_id: str) -> dict:
     return {"snapshot": row, "files": files, "manifest": meta}
 
 
-def snapshot_files(db: Database, settings: Settings, snapshot_id: str) -> dict[str, str]:
-    return read_snapshot(db, settings, snapshot_id)["files"]
 
 
 def add_event(db: Database, task_id: str | None, attempt_id: str | None, event_type: str, payload: dict | None = None) -> None:
@@ -643,67 +636,6 @@ def update_performance_best(
         return summary
 
 
-def recompute_performance_best(db: Database, task_id: str, config: dict | None = None) -> dict | None:
-    """Recompute task performance best from persisted passing attempts."""
-    task = db.query_one("SELECT * FROM tasks WHERE id=?", (task_id,))
-    if not task:
-        return None
-    config = config if config is not None else json_loads(task.get("config_json"), {})
-    problem = json_loads(task.get("problem_json"), {})
-    fingerprint = comparison_key(problem, config)
-    best: tuple[float, dict, dict] | None = None
-    for attempt in db.query(
-        "SELECT id, normalized_json, ordinal FROM attempts WHERE task_id=? AND normalized_json IS NOT NULL",
-        (task_id,),
-    ):
-        normalized = json_loads(attempt["normalized_json"], {})
-        if not normalized.get("all_passed"):
-            continue
-        if normalized.get("comparison_key") != fingerprint:
-            continue
-        metric = performance_metric(normalized, config)
-        if metric is None:
-            continue
-        value = metric["value"]
-        if best is None or value < best[0]:
-            best = (value, metric, normalized)
-    if best is None:
-        return None
-    metric = best[1]
-    summary = {
-        "attempt_id": None,
-        "metric": metric["metric"],
-        "value": metric["value"],
-        "max_time": metric["max_time"],
-        "avg_time": metric["avg_time"],
-        "samples": metric["samples"],
-        "unit": metric["unit"],
-        "comparison_key": fingerprint,
-        "updated_at": now(),
-    }
-    # Locate the winning attempt again; keep the update atomic.
-    for attempt in db.query(
-        "SELECT id, normalized_json FROM attempts WHERE task_id=? AND normalized_json IS NOT NULL",
-        (task_id,),
-    ):
-        normalized = json_loads(attempt["normalized_json"], {})
-        if not normalized.get("all_passed") or normalized.get("comparison_key") != fingerprint:
-            continue
-        candidate = performance_metric(normalized, config)
-        if candidate and candidate["metric"] == metric["metric"] and candidate["value"] == metric["value"]:
-            summary["attempt_id"] = attempt["id"]
-            break
-    if not summary["attempt_id"]:
-        return None
-    db.execute(
-        "UPDATE tasks SET performance_best_attempt_id=?, performance_best_json=?, updated_at=? WHERE id=?",
-        (summary["attempt_id"], canonical_json(summary), now(), task_id),
-    )
-    db.insert(
-        "INSERT INTO events(task_id, attempt_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)",
-        (task_id, summary["attempt_id"], "performance_best_recomputed", canonical_json(summary), now()),
-    )
-    return summary
 
 
 def _metric_better(candidate: dict, current: dict | None) -> bool:
@@ -771,24 +703,6 @@ def update_remote_best(
     return None
 
 
-def update_local_best(db: Database, task_id: str, attempt_id: str | None, validation: dict) -> None:
-    """Local validation best is recorded separately from remote best.
-
-    A CPU reference result never becomes a "remote best" and never implies that
-    an Ascend C candidate ran.
-    """
-    summary = {
-        "attempt_id": attempt_id,
-        "candidate_executed": bool(validation.get("candidate_executed")),
-        "status": validation.get("status"),
-        "generator_ok": validation.get("generator_ok"),
-        "reference_ok": validation.get("reference_ok"),
-        "updated_at": now(),
-    }
-    db.execute(
-        "UPDATE tasks SET local_best_json=?, updated_at=? WHERE id=?",
-        (canonical_json(summary), now(), task_id),
-    )
 
 
 # ---------------------------------------------------------------------------

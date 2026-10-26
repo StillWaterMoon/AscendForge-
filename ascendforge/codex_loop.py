@@ -11,7 +11,6 @@ database.  The worker is still the only sender of official submissions.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from pathlib import Path
@@ -27,7 +26,6 @@ from .experiments import (
     add_event,
     attach_snapshot,
     create_attempt,
-    current_attempt,
     get_attempt,
     read_snapshot,
     update_attempt,

@@ -9,12 +9,10 @@ a CSRF token tied to the server-side session.
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import io
 import json
 import logging
-import mimetypes
 import os
 import re
 import shutil
@@ -22,11 +20,9 @@ import sqlite3
 import subprocess
 import sys
 import threading
-import time
 import urllib.parse
 import zipfile
 from dataclasses import dataclass
-from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,7 +35,6 @@ from .execution.capabilities import detect_capabilities
 from .experiments import (
     SnapshotError,
     add_event,
-    archive_integrity,
     attempt_history,
     build_snapshot_zip,
     build_task_archive,
@@ -65,9 +60,8 @@ from .security import (
     setup_token_valid,
     verify_password,
 )
-from .states import TASK_TERMINAL
-from .tasks import TaskError, TaskService, normalize_config
-from .util import canonical_json, iso, json_dumps, json_loads, new_id, now, safe_relpath, sha256_bytes, truncate_text
+from .tasks import TaskError, TaskService
+from .util import canonical_json, json_dumps, json_loads, new_id, now, truncate_text
 
 log = logging.getLogger(__name__)
 

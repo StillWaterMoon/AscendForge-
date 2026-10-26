@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 from ascendforge.config import Settings
 from ascendforge.db import Database
-from ascendforge.experiments import add_event, attach_snapshot, create_attempt, create_snapshot
+from ascendforge.experiments import add_event, attach_snapshot, create_attempt
 from ascendforge.platform.base import PlatformError
 from ascendforge.scheduler import Scheduler
 from ascendforge.security import CredentialStore, SecretBox, load_master_key

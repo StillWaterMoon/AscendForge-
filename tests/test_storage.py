@@ -151,8 +151,8 @@ class StorageTests(unittest.TestCase):
 
     def test_archive_excludes_credentials_and_verifies(self):
         task = seed_task(self.env)
-        attempt = seed_attempt(self.env, task, source="// candidate\n")
-        self.env.credentials.put("model", {"api_key": "sk-very-secret-123456", "base_url": "https://x/v1", "model": "m"})
+        seed_attempt(self.env, task, source="// candidate\n")
+        self.env.credentials.put("cannjudge", {"account": "tester@example.com", "cookies": [{"value": "sk-very-secret-123456"}]})
         path = build_task_archive(self.env.db, self.env.settings, task["id"])
         self.assertTrue(path.is_file())
         with zipfile.ZipFile(path) as zf:
