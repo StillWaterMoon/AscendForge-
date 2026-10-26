@@ -404,13 +404,6 @@ async function renderDashboard() {
     ${attention ? `<div class="alert warn" style="margin-bottom:16px">有 ${attention} 个任务需要处理（登录失效或结果未知），提交调度已暂停。请进入任务详情处理。</div>` : ''}
     ${!worker.alive ? `<div class="alert warn" style="margin-bottom:16px">后台 worker 未运行。网页操作会保存状态，但不会推进提交或结果轮询。请在服务器启动 <span class="mono">ascendforge worker</span>。</div>` : ''}
 
-    <div class="grid grid-4" style="margin-bottom:16px">
-      <div class="metric"><div class="metric-label">运行中</div><div class="metric-value">${esc(counts.running || 0)}</div><div class="metric-note">CLI / 提交循环</div></div>
-      <div class="metric"><div class="metric-label">需处理</div><div class="metric-value" style="color:${attention ? 'var(--accent)' : 'inherit'}">${esc(attention)}</div><div class="metric-note">登录或未知提交</div></div>
-      <div class="metric"><div class="metric-label">已完成</div><div class="metric-value">${esc(counts.completed || 0)}</div><div class="metric-note">含无提升完成</div></div>
-      <div class="metric"><div class="metric-label">全部任务</div><div class="metric-value">${esc(tasks.length)}</div><div class="metric-note">持久化于服务器</div></div>
-    </div>
-
     <div class="card" style="margin-bottom:16px">
       <div class="row" style="gap:22px">
         <div class="small"><span class="faint">CANNJudge：</span>${platform.connected ? badge('已连接', 'completed') : badge('未连接', 'pending')} <span class="muted">${esc(platform.account_masked || '')}</span></div>
