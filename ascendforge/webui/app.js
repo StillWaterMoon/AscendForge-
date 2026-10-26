@@ -18,7 +18,6 @@ const state = {
   platform: null,
   model: null,
   capabilities: null,
-  skills: [],
   attemptTab: 'source',
   attemptData: null,
   toastTimer: null,
@@ -1418,15 +1417,13 @@ function openResolveModal(taskId, submissionId) {
 /* ------------------------------------------------------------------ */
 async function renderConnections() {
   setPoll(null);
-  const [data, platformData, skillData] = await Promise.all([
+  const [data, platformData] = await Promise.all([
     api('/api/capabilities'),
     api('/api/platform/status'),
-    api('/api/skills'),
   ]);
   const platform = platformData.platform || {};
   state.platform = platform;
   state.capabilities = data.capabilities || data;
-  state.skills = skillData.skills || [];
   const caps = state.capabilities || {};
   $('#view').innerHTML = `
     <div class="row-between" style="margin-bottom:18px">
@@ -1475,32 +1472,17 @@ async function renderConnections() {
       <div class="alert info small" style="margin-top:12px">运行器由任务配置中的 <span class="mono">cli_backend</span> 指定；目前只接受 <span class="mono">codex</span>，以后接入其他 CLI 时保持同一工具合同。</div>
     </div>
 
-    <div class="grid grid-2" style="margin-top:16px">
-      <div class="card">
-        <div class="card-head"><h3>服务器能力</h3><span class="faint small">检测时间 ${esc(fmtTime(caps.checked_at))}</span></div>
-        <div class="stack small">
-          <div class="row-between"><span class="muted">NPU</span><span>${caps.npu?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} <span class="faint">${esc(caps.npu?.evidence || '')}</span></span></div>
-          <div class="row-between"><span class="muted">CANN</span><span>${caps.cann?.available ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
-          <div class="row-between"><span class="muted">Docker</span><span>${caps.docker?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} ${caps.docker?.image_present ? '<span class="faint">image ready</span>' : ''}</span></div>
-          <div class="row-between"><span class="muted">隔离执行器</span><span class="mono">${esc(caps.executor?.selected || '—')} ${caps.executor?.network_enforced ? '（禁网）' : '（网络未强制隔离）'}</span></div>
-          <div class="row-between"><span class="muted">候选本地执行</span><span>${caps.candidate_execution?.status === 'available' ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
-          <div class="row-between"><span class="muted">远端自定义测试</span><span class="mono">${caps.remote_custom_tests?.supported ? '已核实支持' : '未核实/禁用'}</span></div>
-        </div>
-        ${caps.executor?.warning ? `<div class="alert warn small" style="margin-top:12px">${esc(caps.executor.warning)}</div>` : ''}
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>已加载 Skills</h3><span class="faint small">显式注入 Agent 提示词</span></div>
-        ${(state.skills || []).length ? `<div class="stack small">${state.skills.map((s) => `<div><div class="mono">${esc(s.name)}</div><div class="faint small">${esc(s.description)}</div><div class="faint mono" style="font-size:10.5px">${esc(s.sha256)}</div></div>`).join('')}</div>` : '<div class="alert warn">skills 目录缺少 SKILL.md，Agent 会拒绝运行并标记需要审查。</div>'}
-      </div>
-    </div>
-
     <div class="card" style="margin-top:16px">
-      <h3>修改登录密码</h3>
-      <form id="password-form" class="form-grid" style="margin-top:10px">
-        <div class="field"><label for="pw-current">当前密码</label><input id="pw-current" type="password" autocomplete="current-password"></div>
-        <div class="field"><label for="pw-new">新密码（≥10 位）</label><input id="pw-new" type="password" minlength="10" autocomplete="new-password"></div>
-        <div class="form-actions" style="grid-column:span 2"><button class="btn" type="submit">更新密码</button></div>
-      </form>
+      <div class="card-head"><h3>服务器能力</h3><span class="faint small">检测时间 ${esc(fmtTime(caps.checked_at))}</span></div>
+      <div class="stack small">
+        <div class="row-between"><span class="muted">NPU</span><span>${caps.npu?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} <span class="faint">${esc(caps.npu?.evidence || '')}</span></span></div>
+        <div class="row-between"><span class="muted">CANN</span><span>${caps.cann?.available ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
+        <div class="row-between"><span class="muted">Docker</span><span>${caps.docker?.available ? badge('可用', 'completed') : badge('不可用', 'pending')} ${caps.docker?.image_present ? '<span class="faint">image ready</span>' : ''}</span></div>
+        <div class="row-between"><span class="muted">隔离执行器</span><span class="mono">${esc(caps.executor?.selected || '—')} ${caps.executor?.network_enforced ? '（禁网）' : '（网络未强制隔离）'}</span></div>
+        <div class="row-between"><span class="muted">候选本地执行</span><span>${caps.candidate_execution?.status === 'available' ? badge('可用', 'completed') : badge('不可用', 'pending')}</span></div>
+        <div class="row-between"><span class="muted">远端自定义测试</span><span class="mono">${caps.remote_custom_tests?.supported ? '已核实支持' : '未核实/禁用'}</span></div>
+      </div>
+      ${caps.executor?.warning ? `<div class="alert warn small" style="margin-top:12px">${esc(caps.executor.warning)}</div>` : ''}
     </div>`;
 
   const platformForm = $('#platform-form');
@@ -1557,14 +1539,6 @@ async function renderConnections() {
     await renderConnections();
   });
 
-  $('#password-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api('/api/auth/password', { method: 'POST', body: { current_password: $('#pw-current').value, new_password: $('#pw-new').value } });
-      toast('密码已更新', 'success');
-      $('#pw-current').value = ''; $('#pw-new').value = '';
-    } catch (err) { toast(err.message || '更新失败', 'error'); }
-  });
 }
 
 /* ------------------------------------------------------------------ */
