@@ -7,7 +7,7 @@
 
 | 项目 | 结论 |
 |---|---|
-| AscendForge 自身闭环 | 已实现并测试（136 个 unittest） |
+| AscendForge 自身闭环 | 已实现并测试（126 个 unittest） |
 | CANNJudge 公开题目/模板/ZIP | **真实联网验证通过** |
 | CANNJudge 登录 | **真实登录已由用户在 Web 完成**（账号已连接，题目权限已验证，密码未保存） |
 | CANNJudge 真实提交/结果 | **已完成（2026-10-21）**：CopySign 模板基线 remote id `6ad84d04193e507d8e4a0502`，返回 `Runtime Error`（0/15）；提交字节/快照一致，结果可独立读回 |
@@ -113,7 +113,6 @@ GET /api/submissions/does-not-exist
 - 两轮 mock 优化：快照 → 提交 → 结果 → 新 attempt（父版本）→ best 提升；第三轮失败不覆盖 best。
 - 内容哈希/篡改检测；导出档案默认排除凭据，可校验 SHA256SUMS。
 - Web：首次 setup、登录、CSRF、幂等 replay、任务控制、模型配置掩码、best/attempt/档案下载。
-- 备份：创建、SHA-256 校验、SQLite integrity_check、恢复、篡改检测；默认不含主密钥。
 - 隔离执行器：环境清洗、超时、输出上限、路径越界拒绝；生成器/参考实现端到端跑通。
 - CANNJudge 提交载荷：核函数多文件、只读保护、禁止文件、额外文件限制、传统四字段。
 

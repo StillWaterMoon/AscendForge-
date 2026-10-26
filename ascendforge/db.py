@@ -488,17 +488,6 @@ class Database:
         )
 
     # -- maintenance ------------------------------------------------------
-    def backup_to(self, target: Path) -> None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        source = self.connect()
-        destination = sqlite3.connect(str(target))
-        try:
-            source.backup(destination)
-            destination.commit()
-        finally:
-            destination.close()
-            source.close()
-
     def integrity_check(self) -> str:
         return str(self.scalar("PRAGMA integrity_check") or "unknown")
 

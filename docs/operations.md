@@ -128,43 +128,7 @@ Web 任务详情 → “导出档案”。包含：
 
 默认排除：模型 key、CANNJudge Cookie、AscendForge 会话、日志。大体积生成数据默认不包含。
 
-### 5.2 服务器备份（灾备）
-
-```bash
-sudo -u ascendforge env $(grep -v '^#' /etc/ascendforge/ascendforge.env | xargs) \
-  /opt/ascendforge/.venv/bin/python -m ascendforge backup
-```
-
-输出目录：`$DATA_DIR/backups/ascendforge-YYYYmmdd-HHMMSS/`，包含：
-
-- `ascendforge.db`（SQLite backup API，包含 WAL 内容）
-- `tasks/`（题目包、快照、生成器）
-- `manifest.json`（每文件 SHA-256、SQLite 路径、是否含主密钥）
-- `SHA256SUMS`
-
-默认**不包含** `secrets/master.key`。没有主密钥，备份里的模型 key/CANNJudge 会话无法解密。
-
-校验：
-
-```bash
-python -m ascendforge verify-backup /var/lib/ascendforge/backups/ascendforge-...
-```
-
-恢复：
-
-```bash
-sudo systemctl stop ascendforge-web ascendforge-worker
-python -m ascendforge restore /path/to/backup --data-dir /var/lib/ascendforge --force
-sudo systemctl start ascendforge-web ascendforge-worker
-```
-
-恢复后：
-
-1. 确认 `secrets/master.key` 与备份匹配；不匹配时模型/CANNJudge 凭据不可用，需要重新连接。
-2. 打开任务详情，检查 unknown 提交；**不会重新发送**，需对账/人工确认。
-3. 运行 `verify-backup` 和一次登录/任务创建演练。
-
-> 备份是敏感数据：即使不含主密钥，仍包含源码、题目和评测反馈。请加密存储并限制访问。
+> 服务器灾备备份功能已移除；仍需保留任务档案导出、数据库与磁盘快照。升级或迁移前请自行备份 `$DATA_DIR` 与 `secrets/master.key`。
 
 ## 6. 升级
 

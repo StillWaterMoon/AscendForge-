@@ -115,10 +115,6 @@ class Settings:
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
 
-    @property
-    def backups_dir(self) -> Path:
-        return self.data_dir / "backups"
-
     def ensure_dirs(self) -> None:
         for path in (
             self.data_dir,
@@ -126,7 +122,6 @@ class Settings:
             self.tasks_dir,
             self.tmp_dir,
             self.logs_dir,
-            self.backups_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
         # Keep generated code / experiment files private by default on POSIX.

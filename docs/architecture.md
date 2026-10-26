@@ -43,7 +43,6 @@
 | Agent | `agent/` | 协议、Provider、Runtime、工具、Prompt/Skill |
 | Execution | `execution/` | Docker/本地执行器、能力检测 |
 | Security | `security.py` | scrypt、Fernet、会话、CSRF、登录限流 |
-| Backup | `backup.py` | 一致性备份、校验、恢复 |
 
 ## 3. 一次优化循环
 

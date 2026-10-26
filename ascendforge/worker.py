@@ -182,7 +182,7 @@ class Worker:
             task_id = row["id"]
             task_row = self.db.query_one("SELECT config_json FROM tasks WHERE id=?", (task_id,))
             config = json_loads(task_row.get("config_json"), {}) if task_row else {}
-            if config.get("parameter_runner_active") or config.get("execution_mode") in ("cli", "codex"):
+            if config.get("execution_mode") in ("cli", "codex"):
                 # The external runner owns attempt creation for this task; the
                 # built-in Agent must not race it.
                 continue

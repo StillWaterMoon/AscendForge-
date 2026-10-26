@@ -1,7 +1,7 @@
 # 验收清单与当前状态
 
 日期：2026-10-21  
-测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **136 passed**
+测试命令：`PYTHONPATH=. python -m unittest discover -s tests -t . -v` → **126 passed**
 
 状态含义：
 
@@ -48,7 +48,7 @@
 | Web 与 worker 独立运行，重启不重复执行 | IMPLEMENTED, NOT LIVE TESTED | 状态全持久化；worker 恢复逻辑有单测；未做真实进程重启演练 |
 | 浏览器写操作防重复，凭据仅服务器保存 | PASS (HTTP) | CSRF 403；X-Request-Id replay；key 掩码 |
 | best/指定版本/任务档案可下载，排除凭据 | PASS (unit/HTTP) | 档案测试扫描无 key；best/attempt 下载 HTTP 测试通过 |
-| 数据库与实验文件持久化，服务器备份/恢复演练 | PASS (unit) | 备份/校验/恢复/篡改检测；真实服务器卷未演练 |
+
 
 ## 3. 安全与诚实性
 
@@ -61,7 +61,7 @@
 | 验证码/二次验证交用户，不绕过 | PASS (design) |
 | 未知提交不自动重发 | PASS (unit) |
 | 导出不含凭据/会话/日志 | PASS (unit) |
-| 备份默认不含主密钥 | PASS (unit) |
+
 
 ## 4. 依赖外部条件、当前无法验收
 

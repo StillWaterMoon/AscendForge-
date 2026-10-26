@@ -45,7 +45,6 @@ from .experiment_service import (
 )
 from .agent.providers import ModelConfig, ProviderError, make_provider
 from .agent.skills import SkillError, SkillRegistry
-from .backup import BackupError, create_backup, list_backups, verify_backup
 from .baseline import create_baseline_submission
 from .config import Settings
 from .db import Database
@@ -265,9 +264,6 @@ class App:
             ("GET", r"^/api/capabilities$", "h_capabilities", False, True),
             ("GET", r"^/api/skills$", "h_skills", False, True),
             ("GET", r"^/api/worker$", "h_worker", False, True),
-            ("GET", r"^/api/backups$", "h_backups_list", False, True),
-            ("POST", r"^/api/backups$", "h_backups_create", False, False),
-            ("GET", r"^/api/backups/(?P<name>[A-Za-z0-9_.-]+)$", "h_backup_download", False, True),
         ]
         return [Route(method, re.compile(pattern), handler, public, csrf) for method, pattern, handler, public, csrf in raw]
 
@@ -525,8 +521,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self._provider_error_status(exc.code), {"error": exc.public()})
         except SnapshotError as exc:
             self._send_json(500, {"error": {"code": "SNAPSHOT_ERROR", "message": str(exc)}})
-        except BackupError as exc:
-            self._send_json(400, {"error": {"code": "BACKUP_ERROR", "message": str(exc)}})
         except (ValueError, KeyError) as exc:
             self._send_json(400, {"error": {"code": "BAD_INPUT", "message": str(exc)[:500]}})
         except Exception:
@@ -1596,7 +1590,7 @@ class Handler(BaseHTTPRequestHandler):
         return 200, {"platform": self.app.platform.disconnect()}
 
     # ==================================================================
-    # Capabilities / skills / worker / backups
+    # Capabilities / skills / worker
     # ==================================================================
     def h_capabilities(self, **_: Any):
         return 200, {"capabilities": self.app.capabilities()}
@@ -1606,39 +1600,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_worker(self, **_: Any):
         return 200, {"worker": self.app.worker_state()}
-
-    def h_backups_list(self, **_: Any):
-        return 200, {"backups": list_backups(self.app.settings)}
-
-    def h_backups_create(self, session: dict | None = None, **_):
-        body = self._read_json()
-        result = create_backup(
-            self.app.settings,
-            self.app.db,
-            include_key=bool(body.get("include_key", False)),
-            include_problem_packages=bool(body.get("include_problem_packages", True)),
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            ((session or {}).get("username"), "backup_create", result["path"], "{}", now()),
-        )
-        return 200, {"backup": result}
-
-    def h_backup_download(self, name: str, **_: Any):
-        settings = self.app.settings
-        base = settings.backups_dir.resolve()
-        source = (base / name).resolve()
-        if base not in source.parents or not source.is_dir():
-            raise ApiError(404, "BACKUP_NOT_FOUND", "backup not found")
-        verification = verify_backup(source)
-        if not verification["ok"]:
-            raise ApiError(409, "BACKUP_INTEGRITY", "备份完整性检查失败：" + "; ".join(verification["problems"][:5]))
-        target = settings.tmp_dir / f"{name}-{int(now())}.zip"
-        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for path in sorted(source.rglob("*")):
-                if path.is_file():
-                    zf.write(path, path.relative_to(source).as_posix())
-        return FilePayload(target, f"{name}.zip", "application/zip")
 
 
 class Server(ThreadingHTTPServer):

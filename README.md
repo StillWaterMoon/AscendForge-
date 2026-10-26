@@ -13,7 +13,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 136 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 126 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 > - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
 
 ## 界面预览
@@ -107,9 +107,6 @@ D:\python\python.exe -m ascendforge worker
 python -m ascendforge status                    # 任务/worker/能力概览
 python -m ascendforge serve                     # Web/API
 python -m ascendforge worker                    # 后台优化
-python -m ascendforge backup                    # 服务器备份（默认不含主密钥）
-python -m ascendforge verify-backup <dir>       # 备份完整性检查
-python -m ascendforge restore <dir> --force     # 恢复（会覆盖目标数据目录）
 python -m ascendforge user list
 python -m ascendforge probe --url https://cannjudge.cn/home
 ```
@@ -142,9 +139,9 @@ ascendforge/
     executor.py          Docker / 本地子进程隔离执行
     capabilities.py      NPU/CANN/Docker 诚实检测
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
-  backup.py, cli.py, db.py, states.py
+  cli.py, db.py, states.py
 skills/                  通用优化 / Ascend / 测试生成 / 工作台 / CLI 启动 skill
-tests/                   136 个 unittest
+tests/                   126 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -161,7 +158,6 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 覆盖范围：`all_passed` 要求声明的预期测试点全部完成且通过；只有部分返回时记为 `testset_passed`/`current_testset_only`，不冒充完整通过
 - 可比性：性能结果带 `comparison_key`（题目版本、测试点集合、CANN/SoC、时间单位和环境指纹）；不同 key 的耗时不会混入同一个 performance best
 - 兼容层：`evaluations` 表、revision 的 config/edit_mode 字段已预留；真实 patch、参数评测和去重仍在下一阶段
-- 参数实验：`parameter-run` 是宿主侧确定性 runner；配置枚举、固定基线、参数化源码快照、结果复用、失败重试、复测和预算耗尽均有记录；`--simulate` 不产生远端提交，真实模式通过 scheduler 提交并等待结果
 - 通用闭环：阶段、责任边界、已验证场景和剩余缺口见 [通用优化闭环](docs/general-optimization-loop.md)；参数扫描是可选执行器，不是所有实验的固定形式
 - CLI Agent 迁移：能力核查与阻塞项见 [CLI Agent 能力核查](docs/cli-agent-capability-audit.md)；当前 Codex CLI 可用，DeepSeek CLI 未安装，尚未切换到 CLI 执行循环
 - 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“继续任务”恢复同一会话
@@ -190,7 +186,6 @@ $ASCENDFORGE_DATA_DIR/
     problem/package.zip   原始题目工程包
     problem/project/      解压后的模板
     snapshots/<id>/files/ 不可变源码快照（含 manifest.json）
-  backups/
   logs/ascendforge.log    轮转日志
   tmp/                    导出/下载临时文件
 ```
@@ -217,7 +212,7 @@ $ASCENDFORGE_DATA_DIR/
 - 密码 scrypt（每用户盐）；会话令牌只在 DB 存 SHA-256。
 - 模型 key 与 CANNJudge Cookie 用 Fernet 加密，密钥在数据库之外；浏览器只看到掩码。
 - 生成代码在独立子进程或 Docker 中执行：临时工作目录、最小环境、输出/时间/内存限制；Docker 模式禁网。**本地子进程回退不能强制禁网**，能力页会明确提示，服务器推荐 Docker。
-- 导出档案默认排除凭据/会话/日志；备份默认不含主密钥。
+- 导出档案默认排除凭据/会话/日志。
 - 远程访问必须经 HTTPS 反向代理，并设置 `ASCENDFORGE_SECURE_COOKIES=true`。
 
 详见 [docs/security.md](docs/security.md)。
@@ -228,7 +223,7 @@ $ASCENDFORGE_DATA_DIR/
 PYTHONPATH=. python -m unittest discover -s tests -t . -v
 ```
 
-覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、两轮 mock 优化与失败不覆盖 best、CSRF/幂等、凭据掩码、档案排除密钥、备份校验/恢复、隔离执行器超时/输出上限/环境清洗、CANNJudge 提交载荷校验、生成器/参考实现隔离执行、任务状态机与 skills 加载、真实 HTTP OpenAI 兼容 Provider（JSON 动作、原生 tool_calls、tools 降级）、提交 401/403/429/unknown 异常分支、手动基线与继续自动优化。
+覆盖：快照不可变与篡改检测、提交限频/每日额度/在途上限、并发原子领取、重启后限频保持、未知提交冻结与对账、人工恢复、CSRF/幂等、凭据掩码、档案排除密钥、隔离执行器超时/输出上限/环境清洗、CANNJudge 提交载荷校验、任务状态机与 skills 加载、Codex 会话暂停/继续、CLI 运行器预留、提交 401/403/429/unknown 异常分支。
 
 ## 尚未验证 / 需要你完成
 
