@@ -1,6 +1,6 @@
 # AscendForge · 昇腾工坊
 
-Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CANNJudge**。
+本地 CLI 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CANNJudge**。
 
 服务器托管 CLI 会话、调度、提交、实验结果和持久化状态；本地主机只需要浏览器。关闭网页、电脑关机或 Web 服务重启都不会丢失任务。
 
@@ -121,18 +121,17 @@ CLI 启动时注入：
 - `skills/start-operator-optimization/TOOLS.md`
 - 题目 URL、workspace、模板/空项目说明、可编辑与只读文件、评分目标
 
-实验记录仍保留在 `experiments` 表供任务详情使用，但不再有 API Agent 提示词分层。
+实验记录仍保留在 `experiments` 表供任务详情使用。
 - 旧数据：已有 attempt 自动归入一个 `legacy` experiment，不伪造历史猜想；下一次新建 attempt 会开启新实验
 - 覆盖范围：`all_passed` 要求声明的预期测试点全部完成且通过；只有部分返回时记为 `testset_passed`/`current_testset_only`，不冒充完整通过
 - 可比性：性能结果带 `comparison_key`（题目版本、测试点集合、CANN/SoC、时间单位和环境指纹）；不同 key 的耗时不会混入同一个 performance best
 - 兼容层：`evaluations` 表、revision 的 config/edit_mode 字段已预留；真实 patch、参数评测和去重仍在下一阶段
-- CLI Agent 迁移：能力核查与阻塞项见 [CLI Agent 能力核查](docs/cli-agent-capability-audit.md)；当前 Codex CLI 可用，DeepSeek CLI 未安装，尚未切换到 CLI 执行循环
 - 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“继续任务”恢复同一会话
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
 - 执行模式：只保留本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入
 - 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace 和日志；running 或存在未知/发送中提交时拒绝删除，审计日志保留
-- Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
+- Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。提交限频、额度、在途、幂等和 unknown 对账仍由宿主强制执行
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值

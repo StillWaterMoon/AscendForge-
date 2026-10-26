@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ascendforge"
 version = "0.1.0"
-description = "AscendForge (昇腾工坊) - Agent-driven Ascend operator optimization platform for CANNJudge"
+description = "AscendForge (昇腾工坊) - CLI-driven Ascend operator optimization platform for CANNJudge"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -15,8 +15,8 @@ dependencies = ["cryptography>=42,<47"]
 ascendforge = "ascendforge.cli:main"
 
 [tool.setuptools]
-packages = ["ascendforge", "ascendforge.platform", "ascendforge.agent", "ascendforge.execution"]
+packages = ["ascendforge", "ascendforge.platform", "ascendforge.agent", "ascendforge.cli_agent", "ascendforge.execution", "ascendforge.mcp"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-ascendforge = ["webui/*.html", "webui/*.css", "webui/*.js"]
+ascendforge = ["webui/*.html", "webui/*.css", "webui/*.js", "webui/assets/*"]
