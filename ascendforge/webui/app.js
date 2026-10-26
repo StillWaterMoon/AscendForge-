@@ -862,7 +862,7 @@ function renderWorkloadRecovery(task) {
     </table></div>
     <div class="small faint" style="margin-top:10px">
       记录来源：${esc(spec.source_task_id || '—')} · 更新于 ${esc(fmtTime(spec.updated_at))}
-      · 已确认测试点 ${esc(cases.filter((item) => item.evidence_status === 'measured').length)}/${esc(cases.length)}
+      · 已确认测试点 ${esc(cases.filter((item) => ['measured', 'confirmed'].includes(item.evidence_status)).length)}/${esc(cases.length)}
       · 未知/推断 ${esc(spec.unknown_count ?? 0)}
       ${rec.diagnostics ? ` · 诊断提交 ${esc(rec.diagnostics)}` : ''}
     </div>
