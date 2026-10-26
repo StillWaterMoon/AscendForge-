@@ -841,6 +841,7 @@ function renderWorkloadRecovery(task) {
       <div class="row" style="margin-top:8px">
         ${['pending', 'running', 'external_blocked'].includes(job.status) ? `<button class="btn btn-sm" data-recovery-action="pause" data-recovery-job="${esc(job.id)}" type="button">暂停逆向</button>` : ''}
         ${['paused', 'external_blocked', 'partial'].includes(job.status) ? `<button class="btn btn-sm btn-primary" data-recovery-action="resume" data-recovery-job="${esc(job.id)}" type="button">继续逆向</button>` : ''}
+        ${['pending', 'running', 'paused', 'external_blocked', 'partial'].includes(job.status) ? `<button class="btn btn-sm btn-danger" data-recovery-action="stop" data-recovery-job="${esc(job.id)}" type="button">停止逆向</button>` : ''}
       </div>
     </div>` : ''}
     ${spec ? `<div class="table-wrap"><table>
@@ -917,7 +918,7 @@ async function workloadRecoveryAction(jobId, action) {
     await api(`/api/workload-recovery/${encodeURIComponent(jobId)}/${action}`, {
       method: 'POST', body: {}, requestId: uuid(),
     });
-    toast(action === 'pause' ? '已请求暂停逆向' : '已继续逆向');
+    toast(action === 'pause' ? '已请求暂停逆向' : action === 'stop' ? '已停止逆向任务' : '已继续逆向');
     await renderTask(state.task.id);
   } catch (error) {
     toast(error.message || '操作失败', 'error');

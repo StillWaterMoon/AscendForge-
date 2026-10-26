@@ -677,6 +677,7 @@ def run_codex_agent(
             mission = (
                 "任务目标：恢复并保存评测输入规格表。只保存 shape/dtype/axis/属性/证据等元信息，"
                 "不得生成或保存大规模 tensor，不做性能刷分优化。\n"
+                "AGENTS.md 允许通过 submit_official 提交诊断代码；禁止的是绕过宿主直接访问 CANNJudge。\n"
                 "在工作区写出 specifications.json 和 evidence.md；宿主会导入并校验。\n"
                 "诊断提交只用于恢复规格；提交时会自动标记为 diagnostic，不会影响优化任务的 best。\n"
             )
@@ -726,8 +727,10 @@ def run_codex_agent(
                 break
             if mode == "recovery":
                 resume_instruction = (
-                    "继续逆向评测数据。检查工作区已有 specifications.json/evidence.md，"
-                    "继续补全未知项；只保存元信息和证据，不生成 tensor。"
+                    "继续逆向评测数据。工作区 AGENTS.md 已更新：允许并应通过 submit_official "
+                    "提交诊断代码获取官方证据，禁止的是绕过宿主直接访问 CANNJudge。"
+                    "检查工作区已有 specifications.json/evidence.md，继续补全未知项；"
+                    "只保存元信息和证据，不生成 tensor。"
                 )
             else:
                 resume_instruction = (

@@ -61,6 +61,8 @@ submit_official(...)
 read_official_evaluation(submission_id)
 ```
 
+工作区 `AGENTS.md` 明确允许通过 `submit_official` 发起诊断提交；它只禁止绕过宿主直接调用 CANNJudge。诊断提交仍受任务暂停状态和共享 Scheduler 限制。
+
 ## 结构化导入
 
 Codex 在 workspace 写出：

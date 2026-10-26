@@ -98,8 +98,12 @@ class CodexAdapter:
         )
         (workspace / "AGENTS.md").write_text(
             "# Task workspace\n\n"
-            "Only modify source files under this workspace. Do not access credentials, "
-            "the platform database, or submit to the official judge.\n\n"
+            "Only modify source files under this workspace. Do not access credentials or "
+            "the platform database directly.\n\n"
+            "Official submissions MUST go through the provided `submit_official` dynamic tool "
+            "when it is available. Never call CANNJudge directly or bypass the host scheduler.\n"
+            "Workload-recovery diagnostic submissions are allowed through the same tool and are "
+            "isolated from optimization bests.\n\n"
             + instructions,
             encoding="utf-8",
         )
