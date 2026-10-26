@@ -62,6 +62,7 @@ from .security import (
 )
 from .tasks import TaskError, TaskService
 from .util import canonical_json, json_dumps, json_loads, new_id, now, truncate_text
+from .workload_recovery import RecoveryError, WorkloadRecoveryService
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class App:
         self.platform = PlatformService(self.db, settings, self.credentials)
         self.tasks = TaskService(self.db, settings, self.platform)
         self.scheduler = Scheduler(self.db, settings, self.platform, self.tasks)
+        self.recovery = WorkloadRecoveryService(self.db, settings, self.tasks, self.scheduler)
         self.throttle = LoginThrottle()
         self.idem_lock = threading.Lock()
         self.setup_token = settings.setup_token
@@ -204,6 +206,11 @@ class App:
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/codex-run$", "h_codex_run", False, False),
+            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/workload-recovery$", "h_workload_recovery_start", False, False),
+            ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/workload-recovery$", "h_workload_recovery_task", False, True),
+            ("GET", r"^/api/workload-recovery/(?P<job_id>[A-Za-z0-9_-]+)$", "h_workload_recovery_get", False, True),
+            ("POST", r"^/api/workload-recovery/(?P<job_id>[A-Za-z0-9_-]+)/(?P<action>pause|resume|stop)$", "h_workload_recovery_control", False, False),
+            ("GET", r"^/api/workload-recovery/(?P<job_id>[A-Za-z0-9_-]+)/diagnostics$", "h_workload_recovery_diagnostics", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)/download$", "h_attempt_download", False, True),
@@ -471,6 +478,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self._task_error_status(exc.code), {"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
         except PlatformError as exc:
             self._send_json(self._platform_error_status(exc.code), {"error": exc.public()})
+        except RecoveryError as exc:
+            status = 404 if exc.code == "RECOVERY_NOT_FOUND" else 409 if exc.code in ("RECOVERY_LOCKED", "BAD_STATE") else 400
+            self._send_json(status, {"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
         except SnapshotError as exc:
             self._send_json(500, {"error": {"code": "SNAPSHOT_ERROR", "message": str(exc)}})
         except (ValueError, KeyError) as exc:
@@ -765,6 +775,7 @@ class Handler(BaseHTTPRequestHandler):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
+        detail["workload_recovery"] = self.app.recovery.summary_for_task(task_id)
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()
@@ -990,6 +1001,49 @@ class Handler(BaseHTTPRequestHandler):
         if len(prompt) > 8000:
             raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
         return 200, self._launch_codex_runner(task_id, prompt, session)
+
+    def h_workload_recovery_start(self, task_id: str, session: dict | None = None, **_):
+        body = self._read_json()
+        force = bool(body.get("force", False))
+        result = self.app.recovery.start(task_id, actor=(session or {}).get("username"), force=force)
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            (
+                (session or {}).get("username"),
+                "workload_recovery_start",
+                result.get("job", {}).get("id") if result.get("job") else task_id,
+                json_dumps({"mode": result.get("mode"), "force": force}),
+                now(),
+            ),
+        )
+        return 200, result
+
+    def h_workload_recovery_task(self, task_id: str, **_: Any):
+        return 200, {"recovery": self.app.recovery.summary_for_task(task_id)}
+
+    def h_workload_recovery_get(self, job_id: str, **_: Any):
+        job = self.app.recovery.get_job(job_id)
+        return 200, {
+            "job": self.app.recovery.job_public(job),
+            "diagnostics": self.app.recovery.diagnostics(job_id),
+        }
+
+    def h_workload_recovery_control(self, job_id: str, action: str, session: dict | None = None, **_):
+        if action == "pause":
+            self.app.recovery.pause(job_id)
+        elif action == "resume":
+            self.app.recovery.resume(job_id)
+        else:
+            self.app.recovery.stop(job_id)
+        job = self.app.recovery.get_job(job_id)
+        self.app.db.insert(
+            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
+            ((session or {}).get("username"), f"workload_recovery_{action}", job_id, "{}", now()),
+        )
+        return 200, {"job": self.app.recovery.job_public(job)}
+
+    def h_workload_recovery_diagnostics(self, job_id: str, **_: Any):
+        return 200, {"diagnostics": self.app.recovery.diagnostics(job_id)}
 
     def h_task_attempts(self, task_id: str, **_: Any):
         attempts = attempt_history(self.app.db, task_id, limit=100)

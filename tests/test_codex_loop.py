@@ -147,6 +147,34 @@ class CodexLoopTests(unittest.TestCase):
             ["url"],
         )
 
+    def test_recovery_mode_injects_recovery_skill_and_independent_thread(self):
+        tmp = Path(tempfile.mkdtemp(prefix="af-codex-recovery-"))
+        env = make_env(tmp)
+        task = seed_task(env, status="running", title="Recovery prompt", config={"execution_mode": "codex"})
+        adapter = CaptureAgentAdapter()
+        worker = FakeWorker(env)
+
+        def make_adapter(**kwargs):
+            adapter.thread_name = kwargs.get("thread_name")
+            return adapter
+
+        with patch("ascendforge.codex_loop._services", return_value=(env.db, env.tasks, env.scheduler, worker)), patch(
+            "ascendforge.codex_loop.AppServerAdapter", side_effect=make_adapter
+        ):
+            result = run_codex_agent(
+                env.settings,
+                task["id"],
+                timeout_sec=10,
+                mode="recovery",
+                skill_name="recover-operator-workload",
+                skip_preflight=True,
+            )
+        self.assertEqual(result["turns"], 1)
+        self.assertIn("恢复算子输入规格", adapter.prompts[0])
+        self.assertIn("不得生成或保存大规模 tensor", adapter.prompts[0])
+        self.assertIn("逆向评测数据", adapter.thread_name)
+        self.assertEqual(env.tasks.get(task["id"])["status"], "paused")
+
     def test_codex_agent_sends_placeholder_skill_and_pauses_on_api_error(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-agent-"))
         env = make_env(tmp)

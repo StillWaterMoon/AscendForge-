@@ -646,11 +646,13 @@ async function renderTask(taskId) {
             ? '<button class="btn btn-primary" data-pause-task="1" type="button">暂停任务</button>'
             : '<button class="btn btn-primary" data-continue-task="1" type="button">继续任务</button>';
         })()}
+        <button class="btn" data-workload-recovery="1" type="button">逆向评测数据</button>
       </div>
     </div>
 
     ${renderTaskAlert(task, quota)}
     ${renderTestcaseOverview(task)}
+    ${renderWorkloadRecovery(task)}
 
     <div class="card">
       <div class="tabs" id="task-tabs">
@@ -664,6 +666,15 @@ async function renderTask(taskId) {
   if (pauseButton) pauseButton.addEventListener('click', () => pauseTask(task.id));
   const continueButton = $('[data-continue-task]');
   if (continueButton) continueButton.addEventListener('click', () => continueTask(task.id));
+  $$('[data-workload-recovery]').forEach((button) => {
+    button.addEventListener('click', () => startWorkloadRecovery(task.id));
+  });
+  $$('[data-recovery-action]').forEach((button) => {
+    button.addEventListener('click', () => workloadRecoveryAction(button.dataset.recoveryJob, button.dataset.recoveryAction));
+  });
+  $$('[data-recovery-reprobe]').forEach((button) => {
+    button.addEventListener('click', () => startWorkloadRecovery(task.id, true));
+  });
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
   });
@@ -773,6 +784,144 @@ function recordCells(attempt, normalized) {
     cases: esc(cases),
     thought: esc(attempt.hypothesis || ''),
   };
+}
+
+const RECOVERY_STATUS = {
+  pending: ['待开始', 'pending'],
+  running: ['运行中', 'running'],
+  paused: ['已暂停', 'paused'],
+  external_blocked: ['外部阻塞', 'unknown'],
+  verified: ['已验证', 'completed'],
+  partial: ['部分完成', 'pending'],
+  completed: ['已完成', 'completed'],
+  failed: ['失败', 'failed'],
+  stopped: ['已停止', 'failed'],
+};
+
+const EVIDENCE_STATUS = {
+  measured: ['已验证', 'pass'],
+  provided: ['用户提供', 'unknown'],
+  inferred: ['推断', 'pending'],
+  unknown: ['未知', 'unknown'],
+};
+
+function renderWorkloadRecovery(task) {
+  const rec = task.workload_recovery;
+  if (!rec) return '';
+  const fp = rec.fingerprint || {};
+  const job = rec.job;
+  const spec = rec.spec;
+  const jobStatus = job ? (RECOVERY_STATUS[job.status] || [job.status, 'unknown']) : null;
+  const specStatus = spec ? (RECOVERY_STATUS[spec.status] || [spec.status, 'unknown']) : null;
+  const tensorText = (tensor) => {
+    const shape = Array.isArray(tensor.shape) ? `[${tensor.shape.join('×')}]` : '?';
+    const numel = tensor.numel === null || tensor.numel === undefined ? '' : ` · ${tensor.numel}`;
+    return `${tensor.name || '?'}: ${tensor.dtype || '?'} ${shape}${numel}`;
+  };
+  const cases = spec?.testcases || [];
+  const warnings = spec?.validation?.warnings || [];
+  return `<div class="card" style="margin-bottom:16px" id="workload-recovery">
+    <div class="card-head">
+      <div>
+        <h3>逆向评测数据</h3>
+        <div class="card-sub">
+          ${esc(fp.platform || 'cannjudge')} · ${esc(fp.scope || '')} · ${esc(fp.problem_id || '')}
+          · 版本 ${esc(fp.problem_version || '未知')} · 测试集 ${esc(fp.testset_key || '未知')}
+        </div>
+      </div>
+      <div class="row">
+        ${job ? badge(jobStatus[0], jobStatus[1]) : ''}
+        ${spec ? badge(`规格 ${specStatus[0]}`, specStatus[1]) : ''}
+        ${job && job.codex_runner_active ? '<span class="faint small">Codex 运行中</span>' : ''}
+      </div>
+    </div>
+    ${job ? `<div class="alert ${job.status === 'failed' ? 'error' : job.status === 'external_blocked' ? 'warn' : 'info'}" style="margin-bottom:12px">
+      <div class="row-between"><strong>逆向任务 ${esc(job.id)}</strong><span class="mono small">${esc(job.phase || '')}</span></div>
+      ${job.error_message ? `<div class="small" style="margin-top:6px">${esc(job.error_code || '')} · ${esc(job.error_message)}</div>` : ''}
+      <div class="row" style="margin-top:8px">
+        ${['pending', 'running', 'external_blocked'].includes(job.status) ? `<button class="btn btn-sm" data-recovery-action="pause" data-recovery-job="${esc(job.id)}" type="button">暂停逆向</button>` : ''}
+        ${['paused', 'external_blocked', 'partial'].includes(job.status) ? `<button class="btn btn-sm btn-primary" data-recovery-action="resume" data-recovery-job="${esc(job.id)}" type="button">继续逆向</button>` : ''}
+      </div>
+    </div>` : ''}
+    ${spec ? `<div class="table-wrap"><table>
+      <thead><tr><th>测试点</th><th>输入</th><th>输出</th><th>属性 / 派生</th><th>状态</th><th>证据</th></tr></thead>
+      <tbody>${cases.map((item) => {
+        const status = EVIDENCE_STATUS[item.evidence_status] || [item.evidence_status || '未知', 'unknown'];
+        const refs = (item.evidence_refs || []).map((ref) => typeof ref === 'string' ? ref : (ref.submission_id || ref.attempt_id || ref.snapshot_id || '')).filter(Boolean);
+        return `<tr>
+          <td class="mono">${esc(item.testcase_id)}</td>
+          <td class="small">${(item.inputs || []).map((tensor) => `<div class="mono">${esc(tensorText(tensor))}</div>`).join('') || '—'}</td>
+          <td class="small">${(item.outputs || []).map((tensor) => `<div class="mono">${esc(tensorText(tensor))}</div>`).join('') || '—'}</td>
+          <td class="small mono">${esc(JSON.stringify({ attributes: item.attributes || {}, derived: item.derived || {} }))}</td>
+          <td>${badge(status[0], status[1])}</td>
+          <td class="small mono">${refs.length ? refs.map(esc).join(', ') : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div class="small faint" style="margin-top:10px">
+      记录来源：${esc(spec.source_task_id || '—')} · 更新于 ${esc(fmtTime(spec.updated_at))}
+      · 已确认测试点 ${esc(cases.filter((item) => item.evidence_status === 'measured').length)}/${esc(cases.length)}
+      · 未知/推断 ${esc(spec.unknown_count ?? 0)}
+      ${rec.diagnostics ? ` · 诊断提交 ${esc(rec.diagnostics)}` : ''}
+    </div>
+    ${rec.diagnostic_rows?.length ? `<details class="recovery-details" style="margin-top:10px">
+      <summary>诊断提交 ${esc(rec.diagnostics)} 条</summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>提交</th><th>状态</th><th>远端 ID</th><th>错误</th></tr></thead>
+        <tbody>${rec.diagnostic_rows.map((row) => `<tr>
+          <td class="mono">${esc(row.ordinal ?? '—')}</td>
+          <td class="mono small">${esc(row.submission_id || row.attempt_id || '—')}</td>
+          <td class="mono">${esc(row.state || '—')}</td>
+          <td class="mono small">${esc(row.remote_id || '—')}</td>
+          <td class="small">${esc(row.error_code || '—')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </details>` : ''}
+    ${warnings.length ? `<div class="alert warn small" style="margin-top:10px">${warnings.slice(0, 8).map(esc).join('<br>')}</div>` : ''}
+    <div class="row" style="margin-top:10px">
+      ${!job || !['pending', 'running', 'paused', 'external_blocked'].includes(job.status) ? `<button class="btn btn-sm" data-recovery-reprobe="1" type="button">重新验证/重新探测</button>` : ''}
+    </div>` : `<div class="empty">还没有可复用的输入规格。点击右上角“逆向评测数据”启动独立 Codex 逆向会话。</div>`}
+  </div>`;
+}
+
+async function startWorkloadRecovery(taskId, force = false) {
+  const rec = state.task?.workload_recovery;
+  if (rec?.active) {
+    toast('已有逆向任务正在运行，直接复用其进度');
+    document.getElementById('workload-recovery')?.scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+  if (rec?.spec?.status === 'verified') {
+    toast('已有已验证规格，直接复用，不新建会话');
+    document.getElementById('workload-recovery')?.scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+  try {
+    const result = await api(`/api/tasks/${encodeURIComponent(taskId)}/workload-recovery`, {
+      method: 'POST',
+      body: { force: Boolean(force || rec?.spec?.status === 'partial') },
+      requestId: uuid(),
+    });
+    if (result.mode === 'cache') toast('复用已有已验证规格');
+    else if (result.mode === 'active') toast('复用正在运行的逆向任务');
+    else if (result.mode === 'partial') toast('已有部分规格，可点击“重新验证/重新探测”继续');
+    else toast('已启动独立逆向会话');
+    await renderTask(taskId);
+  } catch (error) {
+    toast(error.message || '启动逆向失败', 'error');
+  }
+}
+
+async function workloadRecoveryAction(jobId, action) {
+  try {
+    await api(`/api/workload-recovery/${encodeURIComponent(jobId)}/${action}`, {
+      method: 'POST', body: {}, requestId: uuid(),
+    });
+    toast(action === 'pause' ? '已请求暂停逆向' : '已继续逆向');
+    await renderTask(state.task.id);
+  } catch (error) {
+    toast(error.message || '操作失败', 'error');
+  }
 }
 
 function renderTaskTab(task) {

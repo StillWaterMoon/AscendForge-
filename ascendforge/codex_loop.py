@@ -243,6 +243,10 @@ def run_codex_agent(
     submission_timeout: float = 1200,
     keep_running: bool = False,
     lock_token: str | None = None,
+    mode: str = "optimization",
+    skill_name: str | None = None,
+    startup_extra: str = "",
+    skip_preflight: bool = False,
 ) -> dict:
     """Tool-driven Codex session; no fixed round count.
 
@@ -386,9 +390,10 @@ def run_codex_agent(
         audit = audit_candidate(state["parent_files"], files)
         if not audit["effective"]:
             raise ValueError("workspace changes are comments/whitespace only")
-        check = preflight_candidate(files, json_loads(task.get("problem_json"), {}))
-        if not check["ok"]:
-            raise ValueError("preflight failed: " + "; ".join(item["message"] for item in check["errors"][:5]))
+        if not skip_preflight:
+            check = preflight_candidate(files, json_loads(task.get("problem_json"), {}))
+            if not check["ok"]:
+                raise ValueError("preflight failed: " + "; ".join(item["message"] for item in check["errors"][:5]))
         return files, audit
 
     def tool_handler(tool: str, arguments: dict, raw: dict) -> dict | str:
@@ -488,7 +493,12 @@ def run_codex_agent(
                 files=files,
             )
             update_attempt(db, attempt["id"], snapshot_id=snapshot["id"], status="generated")
+            if mode == "recovery":
+                db.execute("UPDATE attempts SET diagnostic=1 WHERE id=?", (attempt["id"],))
             submission = scheduler.request_submission(task_id, attempt["id"])
+            if mode == "recovery":
+                db.execute("UPDATE submissions SET diagnostic=1 WHERE id=?", (submission["id"],))
+                submission = db.query_one("SELECT * FROM submissions WHERE id=?", (submission["id"],))
             if request_id:
                 db.execute(
                     "UPDATE submissions SET eval_key=?, updated_at=? WHERE id=?",
@@ -564,6 +574,8 @@ def run_codex_agent(
                     {"files": sorted(files), "source": "codex-workspace", "audit": audit}
                 ),
             )
+            if mode == "recovery":
+                db.execute("UPDATE attempts SET diagnostic=1 WHERE id=?", (attempt["id"],))
             snapshot = attach_snapshot(
                 db,
                 settings,
@@ -619,12 +631,15 @@ def run_codex_agent(
 
     turn_error: str | None = None
     try:
+        thread_name = _codex_thread_name(task)
+        if mode == "recovery":
+            thread_name = f"{task.get('problem_title') or task.get('title') or task_id}逆向评测数据"
         adapter = AppServerAdapter(
             timeout_sec=timeout_sec,
             on_event=on_event,
             on_tool_call=tool_handler,
             tools=CLI_TOOL_SPECS,
-            thread_name=_codex_thread_name(task),
+            thread_name=thread_name,
         )
         if not workspace.exists():
             workspace = adapter.prepare_workspace(
@@ -640,7 +655,8 @@ def run_codex_agent(
                 instructions="Use the provided dynamic tools; do not attempt to submit outside them.",
             )
         # 首次启动注入真实 SKILL.md 和 TOOLS.md，而不是占位文本。
-        skill_path = Path(settings.root) / "skills" / "start-operator-optimization" / "SKILL.md"
+        injected_skill = skill_name or "start-operator-optimization"
+        skill_path = Path(settings.root) / "skills" / injected_skill / "SKILL.md"
         tools_path = Path(settings.root) / "skills" / "start-operator-optimization" / "TOOLS.md"
         skill_text = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "SKILL.md 未找到"
         tools_text = tools_path.read_text(encoding="utf-8") if tools_path.is_file() else "TOOLS.md 未找到"
@@ -657,6 +673,18 @@ def run_codex_agent(
             )
         else:
             template_info = "项目模板：未上传，workspace 从空项目开始，需要自行创建源码和构建文件。\n"
+        if mode == "recovery":
+            mission = (
+                "任务目标：恢复并保存评测输入规格表。只保存 shape/dtype/axis/属性/证据等元信息，"
+                "不得生成或保存大规模 tensor，不做性能刷分优化。\n"
+                "在工作区写出 specifications.json 和 evidence.md；宿主会导入并校验。\n"
+                "诊断提交只用于恢复规格；提交时会自动标记为 diagnostic，不会影响优化任务的 best。\n"
+            )
+        else:
+            mission = (
+                "任务目标：持续优化算子。提交后必须轮询 read_official_evaluation，"
+                "根据真实结果决定修复、继续、回退或更换方向。\n"
+            )
         startup = (
             "下面是首次启动必须完整阅读的 skill 和工具合同。\n\n"
             "===== SKILL.md =====\n"
@@ -677,7 +705,9 @@ def run_codex_agent(
             + "源码请直接用你自己的文件工具在 workspace 内读取和修改；不要等待用户逐步指挥。\n"
             + "只修改可编辑文件：kernel.asc 和根目录 .asc/.h；不要修改 main.asc、CMakeLists.txt、run.sh、sample.py、reference.py。\n"
             + "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"
-            + "提交后必须轮询 read_official_evaluation，根据真实结果决定修复、继续、回退或更换方向。\n\n"
+            + mission
+            + (startup_extra or "")
+            + "\n"
             + (prompt or "")
         )
         turns = 0
@@ -694,10 +724,17 @@ def run_codex_agent(
                 continue
             if current["status"] != "running":
                 break
-            instruction = startup if turns == 0 and not session_ref else (
-                "继续自主优化。读取最新提交结果，决定下一步；使用工具保存/提交候选。"
-                "不要等待用户逐步指挥，直到用户暂停或停止。"
-            )
+            if mode == "recovery":
+                resume_instruction = (
+                    "继续逆向评测数据。检查工作区已有 specifications.json/evidence.md，"
+                    "继续补全未知项；只保存元信息和证据，不生成 tensor。"
+                )
+            else:
+                resume_instruction = (
+                    "继续自主优化。读取最新提交结果，决定下一步；使用工具保存/提交候选。"
+                    "不要等待用户逐步指挥，直到用户暂停或停止。"
+                )
+            instruction = startup if turns == 0 and not session_ref else resume_instruction
             if session_ref:
                 phase("resuming_session", codex_session_ref=session_ref, codex_turn_id=None)
                 add_event(

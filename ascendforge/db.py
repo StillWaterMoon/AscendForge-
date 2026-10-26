@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -95,9 +95,60 @@ CREATE TABLE IF NOT EXISTS tasks (
     last_error TEXT,
     created_by TEXT,
     worker_id TEXT,
-    worker_lease_until REAL
+    worker_lease_until REAL,
+    is_recovery INTEGER NOT NULL DEFAULT 0,
+    recovery_job_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status_next ON tasks(status, next_action_at);
+
+CREATE TABLE IF NOT EXISTS workload_specs (
+    id TEXT PRIMARY KEY,
+    spec_key TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    platform TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    problem_id TEXT NOT NULL,
+    problem_version TEXT,
+    testset_key TEXT,
+    testcase_ids_json TEXT,
+    status TEXT NOT NULL DEFAULT 'partial',
+    specs_json TEXT NOT NULL,
+    evidence_md TEXT,
+    source_job_id TEXT,
+    source_task_id TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    UNIQUE(spec_key, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_workload_specs_key ON workload_specs(spec_key, revision DESC);
+
+CREATE TABLE IF NOT EXISTS workload_recovery_jobs (
+    id TEXT PRIMARY KEY,
+    spec_key TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    workspace_task_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    phase TEXT,
+    progress_json TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    workspace_path TEXT,
+    log_path TEXT,
+    codex_session_ref TEXT,
+    codex_runner_pid INTEGER,
+    codex_pause_requested INTEGER NOT NULL DEFAULT 0,
+    specs_json TEXT,
+    evidence_md TEXT,
+    import_json TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    started_at REAL,
+    finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_jobs_key ON workload_recovery_jobs(spec_key, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recovery_jobs_active
+    ON workload_recovery_jobs(spec_key)
+    WHERE status IN ('pending', 'running', 'paused', 'external_blocked');
 
 CREATE TABLE IF NOT EXISTS experiments (
     id TEXT PRIMARY KEY,
@@ -132,6 +183,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     hypothesis TEXT,
     summary TEXT,
     snapshot_id TEXT,
+    diagnostic INTEGER NOT NULL DEFAULT 0,
     provider TEXT,
     model TEXT,
     prompt_version TEXT,
@@ -177,6 +229,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     attempt_id TEXT,
     snapshot_id TEXT NOT NULL,
     state TEXT NOT NULL,
+    diagnostic INTEGER NOT NULL DEFAULT 0,
     request_hash TEXT,
     idempotency_key TEXT,
     sent_at REAL,
@@ -346,8 +399,11 @@ class Database:
             "tasks": {
                 "performance_best_attempt_id": "TEXT",
                 "performance_best_json": "TEXT",
+                "is_recovery": "INTEGER NOT NULL DEFAULT 0",
+                "recovery_job_id": "TEXT",
             },
             "attempts": {
+                "diagnostic": "INTEGER NOT NULL DEFAULT 0",
                 "experiment_id": "TEXT",
                 "revision_kind": "TEXT",
                 "config_json": "TEXT",
@@ -357,6 +413,7 @@ class Database:
                 "changed_files_json": "TEXT",
             },
             "submissions": {
+                "diagnostic": "INTEGER NOT NULL DEFAULT 0",
                 "experiment_id": "TEXT",
                 "evaluation_id": "TEXT",
                 "eval_key": "TEXT",
@@ -369,6 +426,7 @@ class Database:
             for name, definition in columns.items():
                 if name not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_recovery_job ON tasks(recovery_job_id)")
 
     @contextmanager
     def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:

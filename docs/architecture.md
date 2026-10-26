@@ -38,6 +38,7 @@
 | Scheduler | `scheduler.py` | 同账号队列、间隔/每日/在途/预算、unknown 对账 |
 | Task | `tasks.py` | 配置校验、状态机、暂停/恢复/停止语义 |
 | Experiments | `experiments.py` | 快照/哈希、结果归一化、best、档案 |
+| Workload recovery | `workload_recovery.py` | 评测输入规格缓存、独立逆向会话、结构化导入 |
 | Platform | `platform/` | 适配器契约、CANNJudge、连接服务 |
 | Agent | `agent/` | 改动审计与提交前检查（CLI 执行） |
 | Execution | `execution/` | NPU/CANN 能力检测 |
@@ -150,7 +151,9 @@ read_official_evaluation
 
 ## 10. 数据表（SQLite）
 
-`users`, `sessions`, `idempotency`, `credentials`, `app_settings`, `tasks`, `attempts`, `snapshots`, `submissions`, `events`, `agent_messages`, `audit_log`, `cli_runs`, `task_messages`.
+`users`, `sessions`, `idempotency`, `credentials`, `app_settings`, `tasks`, `attempts`, `snapshots`, `submissions`, `events`, `agent_messages`, `audit_log`, `cli_runs`, `task_messages`, `workload_specs`, `workload_recovery_jobs`.
+
+逆向任务使用隐藏的 recovery task（`tasks.is_recovery=1`）取得独立 workspace 和 Codex thread；诊断提交仍经过同一个 Scheduler，因此共享限频/在途/额度，但不会写入优化任务的 best。
 
 凭据只存 `credentials.ciphertext`（Fernet），主密钥在 `secrets/master.key` 或 `ASCENDFORGE_SECRET_KEY`；数据库备份不含明文密钥。
 

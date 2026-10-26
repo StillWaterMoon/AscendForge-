@@ -237,6 +237,27 @@ def cmd_codex_loop(args) -> int:
     return 0
 
 
+def cmd_recovery_run(args) -> int:
+    from .platform.service import PlatformService
+    from .scheduler import Scheduler
+    from .security import CredentialStore, SecretBox, load_master_key
+    from .tasks import TaskService
+    from .workload_recovery import WorkloadRecoveryService
+
+    settings = _settings(args)
+    db = Database(settings.db_path)
+    db.init()
+    box = SecretBox(load_master_key(settings.key_file, os.environ.get("ASCENDFORGE_SECRET_KEY", "")))
+    credentials = CredentialStore(db, box)
+    platform = PlatformService(db, settings, credentials)
+    tasks = TaskService(db, settings, platform)
+    scheduler = Scheduler(db, settings, platform, tasks)
+    service = WorkloadRecoveryService(db, settings, tasks, scheduler)
+    result = service.run_job(args.job)
+    print(json_dumps(result, pretty=True))
+    return 0 if result.get("status") in ("completed", "partial") else 2
+
+
 def cmd_status(args) -> int:
     settings = _settings(args)
     db = Database(settings.db_path)
@@ -349,6 +370,10 @@ def build_parser() -> argparse.ArgumentParser:
     codex_loop.add_argument("--keep-running", action="store_true")
     codex_loop.add_argument("--lock-token", help=argparse.SUPPRESS)
     codex_loop.set_defaults(func=cmd_codex_loop)
+
+    recovery_run = sub.add_parser("recovery-run", help=argparse.SUPPRESS)
+    recovery_run.add_argument("--job", required=True)
+    recovery_run.set_defaults(func=cmd_recovery_run)
 
     user = sub.add_parser("user", help="用户管理")
     user_sub = user.add_subparsers(dest="user_action", required=True)

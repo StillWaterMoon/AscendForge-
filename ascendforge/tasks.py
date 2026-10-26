@@ -361,7 +361,7 @@ class TaskService:
         return message
 
     def list(self) -> list[dict]:
-        rows = self.db.query("SELECT * FROM tasks ORDER BY created_at DESC")
+        rows = self.db.query("SELECT * FROM tasks WHERE is_recovery=0 ORDER BY created_at DESC")
         return [self._summary(self._decode(row)) for row in rows]
 
     @staticmethod
@@ -604,6 +604,72 @@ class TaskService:
                 "project_template_imported",
                 {"sha256": project_sha, "files": project_file_count},
             )
+        return self.get(task_id)
+
+    def create_recovery_task(self, source_task_id: str, job_id: str) -> dict:
+        """Create a hidden task used only by a workload-recovery Codex session.
+
+        Keeping a separate task row gives the recovery runner its own workspace,
+        attempts and best fields, while the Scheduler still applies the shared
+        CANNJudge rate limits. Recovery tasks are excluded from normal task lists.
+        """
+        source = self.get(source_task_id)
+        config = dict(source.get("config") or {})
+        for key in (
+            "codex_session_ref",
+            "codex_runner_active",
+            "codex_runner_pid",
+            "codex_runner_token",
+            "codex_runner_log",
+            "codex_runner_status",
+            "codex_pause_requested",
+            "codex_pause_phase",
+            "codex_resume_phase",
+            "codex_resume_request_id",
+        ):
+            config.pop(key, None)
+        config.update(
+            {
+                "execution_mode": "codex",
+                "cli_backend": "codex",
+                "recovery_job_id": job_id,
+                "recovery_mode": True,
+                "codex_runner_status": "starting",
+            }
+        )
+        task_id = new_id("recovtask")
+        current = now()
+        self.db.execute(
+            "INSERT INTO tasks(id, title, platform, problem_id, problem_url, problem_title, "
+            "problem_json, template_json, package_rel, status, config_json, created_at, updated_at, "
+            "next_action_at, is_recovery, recovery_job_id) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                task_id,
+                f"逆向评测数据 · {source.get('title') or source_task_id}",
+                source.get("platform") or "cannjudge",
+                source.get("problem_id"),
+                source.get("problem_url"),
+                source.get("problem_title"),
+                canonical_json(source.get("problem_json") or {}),
+                canonical_json(source.get("template_json") or {}),
+                source.get("package_rel"),
+                TASK_RUNNING,
+                canonical_json(config),
+                current,
+                current,
+                current,
+                1,
+                job_id,
+            ),
+        )
+        add_event(
+            self.db,
+            task_id,
+            None,
+            "workload_recovery_task_created",
+            {"source_task_id": source_task_id, "job_id": job_id},
+        )
         return self.get(task_id)
 
     # -- control ---------------------------------------------------------
@@ -1013,5 +1079,7 @@ class TaskService:
         )
 
     def status_counts(self) -> dict:
-        rows = self.db.query("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status")
+        rows = self.db.query(
+            "SELECT status, COUNT(*) AS count FROM tasks WHERE is_recovery=0 GROUP BY status"
+        )
         return {row["status"]: row["count"] for row in rows}

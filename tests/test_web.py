@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from ascendforge.web import App, Server
 
@@ -264,6 +265,28 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 404)
         remaining = self.env.db.query_one("SELECT id FROM attempts WHERE id=?", (attempt["id"],))
         self.assertIsNone(remaining)
+
+    def test_03_workload_recovery_api_uses_hidden_task(self):
+        with patch.object(self.app.recovery, "launch", return_value={}):
+            status, payload = self.client.request(
+                "POST",
+                f"/api/tasks/{self.task['id']}/workload-recovery",
+                {"force": False},
+                csrf=self.csrf,
+            )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["mode"], "started")
+        job = payload["job"]
+        self.assertTrue(job["id"].startswith("recovery_"))
+        hidden = self.app.tasks.get(job["workspace_task_id"])
+        self.assertEqual(hidden["is_recovery"], 1)
+        status, payload = self.client.request("GET", f"/api/tasks/{self.task['id']}")
+        self.assertEqual(status, 200)
+        self.assertIn("workload_recovery", payload["task"])
+        self.assertEqual(payload["task"]["workload_recovery"]["job"]["id"], job["id"])
+        status, payload = self.client.request("GET", "/api/tasks")
+        self.assertEqual(status, 200)
+        self.assertNotIn(hidden["id"], [item["id"] for item in payload["tasks"]])
 
     def test_06_logout(self):
         status, payload = self.client.request("POST", "/api/auth/logout", {}, csrf=self.csrf)

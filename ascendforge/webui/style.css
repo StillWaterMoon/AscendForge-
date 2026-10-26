@@ -856,3 +856,7 @@ tr.clickable:hover td { background: rgba(185, 111, 12, 0.045); }
 .segmented input {
   accent-color: var(--accent);
 }
+
+.recovery-details { border: 1px solid var(--border-soft); border-radius: 10px; background: #fbf8f2; padding: 8px 12px; }
+.recovery-details summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+.recovery-details .table-wrap { margin-top: 8px; }
