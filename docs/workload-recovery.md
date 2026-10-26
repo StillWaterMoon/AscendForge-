@@ -42,7 +42,9 @@ data/cli_workspaces/<recovery_task_id>/workspace
 Codex thread: <题目>逆向评测数据
 ```
 
-它与优化任务的 workspace、attempt、best 完全分开。诊断提交通过同一个 Scheduler，因此共享官方账号的冷却、每日额度、在途限制和 unknown 对账；提交 attempts 标记 `diagnostic=1`，不会更新优化任务的 best。
+它与优化任务的 workspace、attempt、best 完全分开。题目模板会原样复制到逆向 workspace，并与正常任务一样在提交时和源码修改一起进入快照；`specifications.json`、`evidence.md` 等恢复产物只作为工作区证据，不会被当作源码提交。
+
+诊断提交通过同一个 Scheduler，因此共享官方账号的冷却、每日额度、在途限制和 unknown 对账；提交 attempts 标记 `diagnostic=1`，不会更新优化任务的 best。
 
 ## Skill
 

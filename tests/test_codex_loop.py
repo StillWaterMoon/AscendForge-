@@ -173,6 +173,7 @@ class CodexLoopTests(unittest.TestCase):
         self.assertIn("恢复算子输入规格", adapter.prompts[0])
         self.assertIn("第一步必须先调用 read_problem(url)", adapter.prompts[0])
         self.assertIn("不得生成或保存大规模 tensor", adapter.prompts[0])
+        self.assertIn("模板文件：kernel.asc", adapter.prompts[0])
         self.assertIn("逆向评测数据", adapter.thread_name)
         self.assertEqual(env.tasks.get(task["id"])["status"], "paused")
 

@@ -45,6 +45,17 @@ class CodexLoopError(RuntimeError):
 
 # Codex 只暴露三个平台工具：
 # 读题、提交官方、查询官方结果。
+# Workspace metadata and recovery evidence are never submitted as source.
+WORKSPACE_META_NAMES = {
+    "TASK.json",
+    "AGENTS.md",
+    "codex-tools.json",
+    "codex-prompt.txt",
+    "last.txt",
+    "specifications.json",
+    "evidence.md",
+}
+
 # 源码读取/编辑使用 Codex 自己的 workspace 文件能力，不再提供额外文件工具。
 CLI_TOOL_SPECS = [
     {
@@ -375,7 +386,7 @@ def run_codex_agent(
     def collect_effective() -> tuple[dict[str, str], dict]:
         workspace_files = {}
         for path in sorted(workspace.rglob("*")):
-            if path.is_file() and path.name not in ("TASK.json", "AGENTS.md", "codex-tools.json"):
+            if path.is_file() and path.name not in WORKSPACE_META_NAMES:
                 workspace_files[str(path.relative_to(workspace)).replace("\\", "/")] = path.read_text(
                     encoding="utf-8"
                 )
@@ -671,10 +682,14 @@ def run_codex_agent(
         editable_files = [str(item.get("path")) for item in template_files if item.get("editable")]
         readonly_files = [str(item.get("path")) for item in template_files if not item.get("editable")]
         project_source = str(config.get("project_source") or "empty")
-        if project_source == "upload":
+        if template_files:
             template_info = (
-                f"项目模板：已上传并解压到 {settings.data_dir / 'tasks' / task_id / 'project-template'}\n"
+                "项目模板：已复制到当前 workspace；以下文件是模板的一部分，"
+                "提交时会和 workspace 修改一起进入快照。\n"
+                f"模板文件：{', '.join(str(item.get('path')) for item in template_files)}\n"
             )
+        elif project_source == "upload":
+            template_info = "项目模板：已上传，但当前任务没有可用的模板文件清单。\n"
         else:
             template_info = "项目模板：未上传，workspace 从空项目开始，需要自行创建源码和构建文件。\n"
         if mode == "recovery":

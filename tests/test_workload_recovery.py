@@ -58,6 +58,9 @@ class WorkloadRecoveryTests(unittest.TestCase):
         self.assertEqual(hidden["recovery_job_id"], job["id"])
         self.assertNotIn(hidden["id"], [item["id"] for item in self.env.tasks.list()])
         self.assertEqual(hidden["config"]["recovery_mode"], True)
+        source_paths = {item["path"] for item in (self.task.get("template_json") or {}).get("files", [])}
+        hidden_paths = {item["path"] for item in (hidden.get("template_json") or {}).get("files", [])}
+        self.assertEqual(hidden_paths, source_paths)
         self.assertIsNone(self.env.tasks.get(self.task["id"]).get("best_attempt_id"))
 
     def test_diagnostic_records_stay_out_of_optimization_task(self):
