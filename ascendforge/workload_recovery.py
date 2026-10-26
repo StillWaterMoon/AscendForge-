@@ -424,6 +424,7 @@ class WorkloadRecoveryService:
         if hidden["status"] == "paused":
             return {"job_id": job_id, "status": "paused"}
         startup_extra = (
+            "首次启动顺序：先调用 read_problem(url) 阅读完整题面，再读取模板/已有证据，之后才允许诊断提交。"
             "请在当前 workspace 生成 specifications.json 和 evidence.md。specifications.json 顶层格式："
             '{"schema":"ascendforge-workload-spec/1","testcases":[{"testcase_id":"...",'
             '"inputs":[{"name":"x","dtype":"float16","shape":[1,1024],"numel":1024}],'

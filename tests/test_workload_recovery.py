@@ -60,6 +60,25 @@ class WorkloadRecoveryTests(unittest.TestCase):
         self.assertEqual(hidden["config"]["recovery_mode"], True)
         self.assertIsNone(self.env.tasks.get(self.task["id"]).get("best_attempt_id"))
 
+    def test_diagnostic_records_stay_out_of_optimization_task(self):
+        self._start()
+        _fp, _job, hidden = self._job_and_hidden()
+        attempt = seed_attempt(self.env, hidden, source="// recovery diagnostic")
+        self.env.db.execute("UPDATE attempts SET diagnostic=1 WHERE id=?", (attempt["id"],))
+        self.env.scheduler.request_submission(hidden["id"], attempt["id"])
+        self.assertEqual(
+            int(self.env.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (self.task["id"],))),
+            0,
+        )
+        self.assertEqual(
+            int(self.env.db.scalar("SELECT COUNT(*) FROM submissions WHERE task_id=?", (self.task["id"],))),
+            0,
+        )
+        self.assertEqual(
+            int(self.env.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (hidden["id"],))),
+            1,
+        )
+
     def test_import_verified_and_reuse_cache_without_new_job(self):
         self._start()
         fp, job, hidden = self._job_and_hidden()

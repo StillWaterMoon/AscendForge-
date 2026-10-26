@@ -133,6 +133,7 @@ class AppServerAdapter:
             "# Task workspace\n\n"
             "Only modify source files under this workspace. Do not access credentials or "
             "the platform database directly.\n\n"
+            "Before analyzing or submitting, call read_problem(url) and read the full statement.\n\n"
             "Official submissions MUST go through the provided `submit_official` dynamic tool "
             "when it is available. Never call CANNJudge directly or bypass the host scheduler.\n"
             "Workload-recovery diagnostic submissions are allowed through the same tool and are "

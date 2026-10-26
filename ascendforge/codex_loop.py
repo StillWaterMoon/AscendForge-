@@ -330,6 +330,7 @@ def run_codex_agent(
         "saved_attempt_id": None,
         "last_submission_id": None,
         "last_result": None,
+        "problem_read": False,
     }
     history: list[dict] = []
     adapter: AppServerAdapter | None = None
@@ -410,6 +411,7 @@ def run_codex_agent(
             statement = str(problem.get("desc") or problem.get("description") or "")
             if not statement.strip():
                 raise ValueError("problem page has no statement")
+            state["problem_read"] = True
             return statement
         if tool == "read_official_evaluation":
             submission_id = str(arguments.get("submission_id") or "").strip()
@@ -450,6 +452,8 @@ def run_codex_agent(
         if tool == "submit_official":
             # 只保存快照并排队，立即返回 submission_id；不阻塞等待远端结果。
             # Codex 之后调用 read_official_evaluation 查询。
+            if mode == "recovery" and not state.get("problem_read"):
+                raise ValueError("recovery must call read_problem(url) before submit_official")
             current_task = tasks.get(task_id)
             if current_task["status"] != "running":
                 raise ValueError("task must be running to submit_official")
@@ -677,9 +681,12 @@ def run_codex_agent(
             mission = (
                 "任务目标：恢复并保存评测输入规格表。只保存 shape/dtype/axis/属性/证据等元信息，"
                 "不得生成或保存大规模 tensor，不做性能刷分优化。\n"
+                "第一步必须先调用 read_problem(url)，读取完整题面和调用契约；"
+                "读题完成前不要修改文件、不要提交、不要推测输入规格。\n"
                 "AGENTS.md 允许通过 submit_official 提交诊断代码；禁止的是绕过宿主直接访问 CANNJudge。\n"
                 "在工作区写出 specifications.json 和 evidence.md；宿主会导入并校验。\n"
                 "诊断提交只用于恢复规格；提交时会自动标记为 diagnostic，不会影响优化任务的 best。\n"
+                "诊断提交只保存在独立逆向任务中，不能出现在优化任务的尝试/提交列表里。\n"
             )
         else:
             mission = (
