@@ -8,6 +8,7 @@ from unittest.mock import patch
 from ascendforge.codex_loop import (
     CLI_TOOL_SPECS,
     _codex_thread_name,
+    _merge_workspace_files,
     _recover_codex_session_ref,
     run_codex_agent,
 )
@@ -146,6 +147,13 @@ class CodexLoopTests(unittest.TestCase):
             CLI_TOOL_SPECS[0]["inputSchema"]["required"],
             ["url"],
         )
+
+    def test_deleted_parent_file_is_not_resubmitted(self):
+        merged = _merge_workspace_files(
+            {"kernel.asc": "old", "official_evidence.json": "stale"},
+            {"kernel.asc": "new"},
+        )
+        self.assertEqual(merged, {"kernel.asc": "new"})
 
     def test_recovery_mode_injects_recovery_skill_and_independent_thread(self):
         tmp = Path(tempfile.mkdtemp(prefix="af-codex-recovery-"))

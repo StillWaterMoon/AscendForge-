@@ -71,49 +71,45 @@ read_official_evaluation(submission_id)
 
 ## 结构化导入
 
-Codex 在 workspace 写出：
-
-```text
-specifications.json
-evidence.md
-```
-
-示意：
+Codex 只写一个最小 `specifications.json`，不要求 `evidence.md` 或长篇报告。示意：
 
 ```json
 {
   "schema": "ascendforge-workload-spec/1",
-  "status": "verified",
+  "confirmed": true,
   "testcases": [
     {
       "testcase_id": "case-1",
       "inputs": [{"name": "x", "dtype": "float16", "shape": [2, 3], "numel": 6}],
       "outputs": [{"name": "y", "dtype": "float16", "shape": [2, 3]}],
       "attributes": {"axis": 1},
-      "derived": {},
-      "evidence_status": "measured",
-      "evidence_refs": [{"submission_id": "..."}]
+      "derived": {}
     }
   ]
 }
 ```
 
+`confirmed: true` 表示 Codex 已确认这张表；宿主自动记录来源任务、诊断 submission/attempt/snapshot 和导入时间。
+
 宿主会校验：
 
 - testcase_id 与当前题目/版本
 - shape 只能是非负整数；numel 与 shape 乘积一致
-- evidence_refs 必须对应本逆向任务真实 submission/attempt/snapshot
-- `measured` 没有有效证据会降级为 `inferred`
+- 声明 confirmed 时字段必须完整；未知字段仍用 null
 - 声明完整但缺少已知测试点、或存在未知项时，状态降为 `partial`
 - 工作区出现超过 1 MiB 的 tensor 文件时拒绝导入
 
-`JSON 格式正确` 不等于 `规格已验证`。状态只由证据计算：
+不需要 `evidence.md`，也不需要为每个字段手写 evidence_refs。
+
+状态：
 
 ```text
-verified  全部测试点 measured、证据有效、覆盖已知测试集
-partial   有部分输入规格或存在 inferred/unknown
+verified  Codex confirmed 且字段/测试点覆盖完整
+partial   有部分输入规格或存在 unknown/inferred
 unknown   没有可用输入规格
 ```
+
+`JSON 格式正确` 不等于字段完整；`confirmed` 只表示 Codex 的确认，不伪造官方测量值。
 
 ## 状态
 

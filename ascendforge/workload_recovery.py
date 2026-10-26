@@ -26,7 +26,16 @@ from .util import canonical_json, json_dumps, json_loads, new_id, now
 
 ACTIVE_STATUSES = ("pending", "running", "paused", "external_blocked")
 SPEC_STATUSES = ("verified", "partial", "unknown")
-EVIDENCE_STATUSES = {"measured": "measured", "verified": "measured", "provided": "provided", "user_provided": "provided", "inferred": "inferred", "unknown": "unknown"}
+EVIDENCE_STATUSES = {
+    "measured": "measured",
+    "verified": "measured",
+    "provided": "provided",
+    "user_provided": "provided",
+    "confirmed": "confirmed",
+    "codex_confirmed": "confirmed",
+    "inferred": "inferred",
+    "unknown": "unknown",
+}
 TENSOR_SUFFIXES = {".npy", ".npz", ".bin", ".pt", ".pth", ".onnx", ".ckpt", ".safetensors"}
 MAX_SPEC_BYTES = 2 * 1024 * 1024
 MAX_EVIDENCE_BYTES = 1024 * 1024
@@ -250,6 +259,7 @@ class WorkloadRecoveryService:
             "testset_key": row["testset_key"],
             "testcase_ids": json_loads(row.get("testcase_ids_json"), []),
             "testcases": cases,
+            "confirmed": bool(data.get("confirmed")),
             "case_count": len(cases),
             "unknown_count": sum(
                 1 for case in cases if case.get("evidence_status") in ("unknown", "inferred")
@@ -424,13 +434,13 @@ class WorkloadRecoveryService:
         if hidden["status"] == "paused":
             return {"job_id": job_id, "status": "paused"}
         startup_extra = (
-            "首次启动顺序：先调用 read_problem(url) 阅读完整题面，再读取模板/已有证据，之后才允许诊断提交。"
-            "请在当前 workspace 生成 specifications.json 和 evidence.md。specifications.json 顶层格式："
-            '{"schema":"ascendforge-workload-spec/1","testcases":[{"testcase_id":"...",'
+            "首次启动顺序：先调用 read_problem(url) 阅读完整题面，再读取模板，之后才允许诊断提交。"
+            "为节省 token，只写一个最小 specifications.json，不需要 evidence.md、长篇说明或证据文件。"
+            "顶层必须写 confirmed:true 表示你已确认规格；宿主会记录来源任务和诊断提交。格式："
+            '{"schema":"ascendforge-workload-spec/1","confirmed":true,"testcases":[{"testcase_id":"...",'
             '"inputs":[{"name":"x","dtype":"float16","shape":[1,1024],"numel":1024}],'
-            '"outputs":[],"attributes":{},"derived":{},"evidence_status":"measured|provided|inferred|unknown",'
-            '"evidence_refs":[{"submission_id":"..."}]}]}。'
-            "没有证据的字段写 null；不要把猜测标成 measured。不要生成 tensor 文件。"
+            '"outputs":[],"attributes":{},"derived":{}}]}。'
+            "未知字段写 null，不要编造；不要生成 tensor 文件。"
         )
         error: str | None = None
         error_code: str | None = None
@@ -521,10 +531,6 @@ class WorkloadRecoveryService:
             raise
         except (TypeError, ValueError) as exc:
             raise RecoveryError("BAD_SPEC", str(exc)[:1000]) from exc
-        if normalized["status"] == "verified" and not evidence.strip():
-            normalized["status"] = "partial"
-            normalized.setdefault("warnings", []).append("缺少 evidence.md，不能声明 verified")
-            normalized.setdefault("validation", {}).setdefault("warnings", []).append("缺少 evidence.md，不能声明 verified")
         fp = fingerprint_for_task(task)
         revision = int(self.db.scalar("SELECT COALESCE(MAX(revision), 0) FROM workload_specs WHERE spec_key=?", (fp["spec_key"],)) or 0) + 1
         spec_id = new_id("workload")
@@ -552,6 +558,7 @@ class WorkloadRecoveryService:
             cases_raw = [{"testcase_id": key, **(value if isinstance(value, dict) else {})} for key, value in cases_raw.items()]
         if not isinstance(cases_raw, list) or not cases_raw:
             raise RecoveryError("BAD_SPEC", "specifications.json 必须包含非空 testcases 数组")
+        confirmed = bool(raw.get("confirmed") or raw.get("codex_confirmed"))
         problem = task.get("problem_json") or {}
         expected = _testcase_ids(problem) or []
         expected_set = {str(item) for item in expected}
@@ -584,6 +591,8 @@ class WorkloadRecoveryService:
             inputs = [_normalize_tensor(value, role="input", index=i) for i, value in enumerate(inputs_raw)]
             outputs = [_normalize_tensor(value, role="output", index=i) for i, value in enumerate(outputs_raw)]
             evidence_status = _normalize_status(item.get("evidence_status"))
+            if confirmed and evidence_status in ("unknown", "provided"):
+                evidence_status = "confirmed"
             refs_raw = _refs(item.get("evidence_refs"))
             refs: list[Any] = []
             refs_ok = True
@@ -599,11 +608,11 @@ class WorkloadRecoveryService:
                 else:
                     refs.append(ref)
             if evidence_status == "measured" and not refs_ok:
-                evidence_status = "inferred"
-                warnings.append(f"{case_id}: measured 缺少有效证据，降级为 inferred")
+                evidence_status = "confirmed" if confirmed else "inferred"
+                warnings.append(f"{case_id}: measured 缺少有效证据，降级为 {evidence_status}")
             if evidence_status == "measured" and not refs:
-                evidence_status = "inferred"
-                warnings.append(f"{case_id}: measured 没有证据引用，降级为 inferred")
+                evidence_status = "confirmed" if confirmed else "inferred"
+                warnings.append(f"{case_id}: measured 没有证据引用，降级为 {evidence_status}")
             attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
             derived = item.get("derived") if isinstance(item.get("derived"), dict) else {}
             cases.append({
@@ -616,6 +625,7 @@ class WorkloadRecoveryService:
                 "evidence_refs": refs,
             })
         measured = [case for case in cases if case["evidence_status"] == "measured"]
+        confirmed_cases = [case for case in cases if case["evidence_status"] == "confirmed"]
         covered = bool(expected_set) and expected_set.issubset(seen)
         if expected_set and not covered:
             warnings.append("未覆盖题目声明的全部测试点")
@@ -630,9 +640,11 @@ class WorkloadRecoveryService:
             for tensor in case["inputs"] + case["outputs"]
         )
         claimed = str(raw.get("status") or "").strip().lower()
-        if measured and len(measured) == len(cases) and covered and all_have_inputs and all_specified:
+        all_confirmed = bool(confirmed) and len(confirmed_cases) + len(measured) == len(cases)
+        measured_verified = bool(measured) and len(measured) == len(cases)
+        if (measured_verified or all_confirmed) and covered and all_have_inputs and all_specified:
             status = "verified"
-        elif measured or any(case["inputs"] for case in cases):
+        elif measured or confirmed_cases or any(case["inputs"] for case in cases):
             status = "partial"
         else:
             status = "unknown"
@@ -647,11 +659,13 @@ class WorkloadRecoveryService:
         return {
             "schema": "ascendforge-workload-spec/1",
             "status": status,
+            "confirmed": confirmed,
             "testcases": cases,
             "validation": {
                 "expected_testcase_ids": sorted(expected_set),
                 "covered_testcase_ids": sorted(seen),
                 "measured_cases": len(measured),
+                "confirmed_cases": len(confirmed_cases),
                 "unknown_fields": unknown_fields,
                 "warnings": warnings,
             },

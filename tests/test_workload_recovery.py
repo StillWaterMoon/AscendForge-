@@ -90,6 +90,29 @@ class WorkloadRecoveryTests(unittest.TestCase):
         self.assertIsNone(self.env.db.query_one("SELECT id FROM tasks WHERE id=?", (hidden["id"],)))
         self.assertIsNone(self.env.db.query_one("SELECT id FROM workload_recovery_jobs WHERE id=?", (job["id"],)))
 
+    def test_confirmed_spec_imports_without_evidence_markdown(self):
+        self._start()
+        _fp, job, hidden = self._job_and_hidden()
+        workspace = self.env.settings.data_dir / "cli_workspaces" / hidden["id"] / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        spec = {
+            "schema": "ascendforge-workload-spec/1",
+            "confirmed": True,
+            "testcases": [
+                {
+                    "testcase_id": "case-1",
+                    "inputs": [{"name": "x", "dtype": "float16", "shape": [2, 3]}],
+                    "outputs": [{"name": "y", "dtype": "float16", "shape": [2, 3]}],
+                }
+            ],
+        }
+        (workspace / "specifications.json").write_text(json.dumps(spec), encoding="utf-8")
+        self.assertFalse((workspace / "evidence.md").exists())
+        imported = self.service.import_job(job["id"])
+        self.assertEqual(imported["status"], "verified")
+        stored = self.service.latest_spec(job["spec_key"])
+        self.assertEqual(self.service.spec_public(stored)["confirmed"], True)
+
     def test_import_verified_and_reuse_cache_without_new_job(self):
         self._start()
         fp, job, hidden = self._job_and_hidden()

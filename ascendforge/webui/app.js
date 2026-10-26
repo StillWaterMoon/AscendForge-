@@ -800,6 +800,7 @@ const RECOVERY_STATUS = {
 
 const EVIDENCE_STATUS = {
   measured: ['已验证', 'pass'],
+  confirmed: ['Codex 确认', 'completed'],
   provided: ['用户提供', 'unknown'],
   inferred: ['推断', 'pending'],
   unknown: ['未知', 'unknown'],

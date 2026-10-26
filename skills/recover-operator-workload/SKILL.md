@@ -295,7 +295,15 @@ CRT 是余数合并方法，不会自动提供远端余数。没有有效反馈�
 
 ## 7. 本阶段交付：规格，不是数据
 
-本阶段只写 `specifications.json` 和 `evidence.md`，不生成 tensor 文件、不下载完整输出、不运行数据生成器，也不在本地分配 N 大小的缓冲区。
+本阶段只写一个最小 `specifications.json`；不需要 `evidence.md`、长篇报告或证据文件，以节省 token。不生成 tensor 文件、不下载完整输出、不运行数据生成器，也不在本地分配 N 大小的缓冲区。
+
+顶层写：
+
+```json
+{"schema": "ascendforge-workload-spec/1", "confirmed": true, "testcases": [...]}
+```
+
+`confirmed: true` 表示 Codex 已确认这张规格表；宿主会记录来源任务、诊断 submission/attempt/snapshot 和导入时间，不需要在 JSON 里重复长证据。
 
 输出按 case 保存：
 
@@ -304,7 +312,7 @@ testcase_id
 inputs: name/dtype/shape/numel
 outputs: name/dtype/shape/numel
 attributes / derived
-evidence_status: measured|provided|inferred|unknown
+evidence_status: measured|confirmed|provided|inferred|unknown
 evidence_refs: submission_id / attempt_id / snapshot_id
 ```
 
@@ -328,4 +336,4 @@ evidence_refs: submission_id / attempt_id / snapshot_id
 
 恢复规格和优化实现是不同阶段：不自动把诊断扩为持续刷分。达到本地测试所需精度、剩余未知不影响下一步时可结束恢复；不为了凑满表格无限探测。
 
-最终交付：`specifications.json`、`evidence.md`、诊断提交列表和验证结论。报告确认值、候选范围、未知项、实际执行过的检查及下一步；本阶段不交付 tensor 文件或数据生成器。生产 kernel 根据真实输入计算，不以 case 编号或预存答案替代计算。
+最终交付：一个最小 `specifications.json`、诊断提交列表和验证结论。报告确认值、候选范围、未知项、实际执行过的检查及下一步；本阶段不交付 `evidence.md`、tensor 文件或数据生成器。生产 kernel 根据真实输入计算，不以 case 编号或预存答案替代计算。

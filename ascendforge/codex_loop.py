@@ -123,6 +123,21 @@ def _services(settings: Settings) -> tuple[Database, TaskService, Scheduler, Wor
     return db, tasks, scheduler, worker
 
 
+def _merge_workspace_files(parent_files: dict[str, str], workspace_files: dict[str, str]) -> dict[str, str]:
+    """Merge current workspace over parent, dropping files deleted from the workspace.
+
+    Retaining missing parent paths made a deleted diagnostic file reappear in
+    later snapshots (CANNJudge EXTRA_FILE_REJECTED).
+    """
+    files = {
+        path: content
+        for path, content in parent_files.items()
+        if path in workspace_files
+    }
+    files.update(workspace_files)
+    return files
+
+
 def _workspace_files(workspace: Path) -> dict[str, str]:
     files = {}
     for path in sorted(Path(workspace).rglob("*")):
@@ -397,8 +412,11 @@ def run_codex_agent(
         }
         if not changes:
             raise ValueError("workspace has no source changes to save")
-        files = dict(state["parent_files"])
-        files.update(workspace_files)
+        # A file deleted from the workspace must not be inherited from the parent
+        # snapshot. The old merge left deleted files (for example a diagnostic
+        # official_evidence.json) in every later submission and caused
+        # EXTRA_FILE_REJECTED even though the workspace no longer contained it.
+        files = _merge_workspace_files(state["parent_files"], workspace_files)
         audit = audit_candidate(state["parent_files"], files)
         if not audit["effective"]:
             raise ValueError("workspace changes are comments/whitespace only")
