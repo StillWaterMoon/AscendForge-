@@ -1063,14 +1063,15 @@ function renderTestcaseOverview(task) {
   }
   const rows = [...cases.values()].sort((a, b) => a.index - b.index);
   const display = (value) => (value === null || value === undefined ? '—' : String(value));
+  const timeDisplay = (value) => (value === null || value === undefined ? '—' : `${value} µs`);
   return `<div class="card" style="margin-bottom:16px">
-    <div class="card-head"><div><h3>测试点最优时间</h3><div class="card-sub">OJ best_time 与当前任务历史最小 time；时间为平台原始数值，不做单位换算。</div></div></div>
+    <div class="card-head"><div><h3>测试点最优时间</h3><div class="card-sub">OJ best_time 与当前任务历史最小 time；按 OJ 页面单位 µs 显示，数值不做换算。</div></div></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>测试点</th><th>OJ 最优时间</th><th>我的最优时间</th><th>得分</th></tr></thead>
+      <thead><tr><th>测试点</th><th>OJ 最优时间 (µs)</th><th>我的最优时间 (µs)</th><th>得分</th></tr></thead>
       <tbody>${rows.map((item) => `<tr>
         <td class="mono">#${esc(item.index + 1)}</td>
-        <td class="mono">${esc(display(item.bestTime))}</td>
-        <td class="mono">${esc(display(item.myTime))}</td>
+        <td class="mono">${esc(timeDisplay(item.bestTime))}</td>
+        <td class="mono">${esc(timeDisplay(item.myTime))}</td>
         <td class="mono">${esc(display(item.score))}</td>
       </tr>`).join('')}</tbody>
     </table></div>
