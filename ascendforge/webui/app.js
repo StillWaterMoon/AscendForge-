@@ -1016,25 +1016,6 @@ function renderBestValue(best) {
   return esc(best.raw_status || '通过');
 }
 
-function testcaseScoreSum(normalized) {
-  const testcases = Array.isArray(normalized?.testcases) ? normalized.testcases : [];
-  let total = 0;
-  let found = false;
-  for (const testcase of testcases) {
-    const raw = testcase?.raw || {};
-    const value = raw.score ?? testcase?.score;
-    if (value !== null && value !== undefined && Number.isFinite(Number(value))) {
-      total += Number(value);
-      found = true;
-    }
-  }
-  if (found) return total;
-  if (normalized?.score !== null && normalized?.score !== undefined && Number.isFinite(Number(normalized.score))) {
-    return Number(normalized.score);
-  }
-  return null;
-}
-
 function ojResult(normalized) {
   const raw = String(normalized?.raw_status || '').trim();
   if (!raw) return { label: '—', cls: 'unknown' };
@@ -1048,11 +1029,9 @@ function recordCells(attempt, normalized) {
   const cases = normalized?.testcase_total
     ? `${normalized.testcase_passed ?? 0}/${normalized.testcase_total}`
     : '—';
-  const score = testcaseScoreSum(normalized);
   return {
     result: result.label === '—' ? '<span class="faint">—</span>' : badge(result.label, result.cls),
     cases: esc(cases),
-    score: score === null ? '—' : esc(score),
     thought: esc(attempt.hypothesis || ''),
   };
 }
@@ -1062,7 +1041,7 @@ function renderTaskTab(task) {
     const submissions = task.submissions || [];
     if (!submissions.length) return '<div class="empty">还没有远端提交。</div>';
     return `<div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>思路</th></tr></thead>
+      <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>思路</th></tr></thead>
       <tbody>${submissions.map((submission) => {
         const attempt = (task.attempts || []).find((item) => item.id === submission.attempt_id) || {};
         const cells = recordCells(attempt, attempt.normalized_json || {});
@@ -1074,14 +1053,13 @@ function renderTaskTab(task) {
             ${resolving ? `<button class="btn btn-sm btn-primary" type="button" data-resolve="${esc(submission.id)}">对账</button>` : ''}</td>
           <td>${cells.result}</td>
           <td class="mono">${cells.cases}</td>
-          <td class="mono">${cells.score}</td>
           <td class="record-cell" title="${cells.thought}">${cells.thought}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }
   if (!(task.attempts || []).length) return '<div class="empty">还没有尝试。</div>';
   return `<div class="table-wrap"><table>
-    <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>思路</th></tr></thead>
+    <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>思路</th></tr></thead>
     <tbody>${task.attempts.map((attempt) => {
       const normalized = attempt.normalized_json || {};
       const cells = recordCells(attempt, normalized);
@@ -1090,7 +1068,6 @@ function renderTaskTab(task) {
         <td>${attemptBadge(attempt.status)}</td>
         <td>${cells.result}</td>
         <td class="mono">${cells.cases}</td>
-        <td class="mono">${cells.score}</td>
         <td class="record-cell" title="${cells.thought}">${cells.thought}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
