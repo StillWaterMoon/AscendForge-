@@ -824,10 +824,13 @@ class Handler(BaseHTTPRequestHandler):
         return 200, {"task": detail}
 
     def h_task_delete(self, task_id: str, session: dict | None = None, **_):
+        warnings = self.app.recovery.cleanup_for_task(task_id)
         result = self.app.tasks.delete(
             task_id,
             actor=(session or {}).get("username", "user"),
         )
+        if warnings:
+            result["warnings"] = warnings
         return 200, result
 
     def _launch_codex_runner(self, task_id: str, prompt: str, session: dict | None) -> dict:

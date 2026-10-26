@@ -41,7 +41,7 @@ class TaskStateTests(unittest.TestCase):
         attempt_row = self.env.db.query_one("SELECT status FROM attempts WHERE id=?", (attempt["id"],))
         self.assertEqual(attempt_row["status"], "failed")
 
-    def test_soft_pause_keeps_codex_runner_and_session(self):
+    def test_hard_pause_terminates_codex_runner_and_preserves_session(self):
         task = seed_task(
             self.env,
             status="running",
@@ -57,19 +57,12 @@ class TaskStateTests(unittest.TestCase):
             return_value={"state": "alive", "pid": 4242, "method": "test", "error": None, "duration_ms": 1},
         ):
             self.env.tasks.pause(task["id"], "test")
-            run.assert_not_called()
+            self.assertEqual(run.call_count, 1)
         refreshed = self.env.tasks.get(task["id"])
-        # 两阶段：请求后仍 running，runner 确认后才 paused。
-        self.assertEqual(refreshed["status"], "running")
-        self.assertTrue(refreshed["config"]["codex_runner_active"])
-        self.assertEqual(refreshed["config"]["codex_runner_pid"], 4242)
-        self.assertEqual(refreshed["config"]["codex_pause_phase"], "requested")
-        self.assertTrue(refreshed["config"]["codex_pause_requested"])
-        confirmed = self.env.tasks.confirm_codex_pause(task["id"])
-        self.assertEqual(confirmed["status"], "paused")
-        self.assertEqual(confirmed["config"]["codex_pause_phase"], "confirmed")
-        self.assertTrue(confirmed["config"]["codex_runner_active"])
-        self.assertEqual(confirmed["config"]["codex_session_ref"], "thread-keep")
+        self.assertEqual(refreshed["status"], "paused")
+        self.assertFalse(refreshed["config"]["codex_runner_active"])
+        self.assertNotIn("codex_runner_pid", refreshed["config"])
+        self.assertEqual(refreshed["config"]["codex_session_ref"], "thread-keep")
 
     def test_unknown_process_probe_does_not_kill_runner(self):
         task = seed_task(

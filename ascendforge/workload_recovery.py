@@ -669,6 +669,36 @@ class WorkloadRecoveryService:
         )
         return [dict(row) for row in rows]
 
+    def cleanup_for_task(self, task_id: str) -> list[str]:
+        """Remove recovery jobs/hidden tasks owned by a deleted optimization task.
+
+        Spec cache rows are intentionally shared and remain available for other
+        tasks working on the same problem/version.
+        """
+        warnings: list[str] = []
+        jobs = self.db.query(
+            "SELECT * FROM workload_recovery_jobs WHERE task_id=? ORDER BY created_at", (task_id,)
+        )
+        for job in jobs:
+            try:
+                if job["status"] in ACTIVE_STATUSES:
+                    self.stop(job["id"])
+            except Exception as exc:
+                warnings.append(f"stop {job['id']}: {exc}")
+            hidden_id = job.get("workspace_task_id")
+            if hidden_id:
+                try:
+                    hidden = self.tasks.get(hidden_id)
+                    if hidden["status"] == "running":
+                        self.tasks.stop(hidden_id, reason="source_task_deleted")
+                    self.tasks.delete(hidden_id, actor="recovery_cleanup")
+                except TaskError as exc:
+                    warnings.append(f"delete {hidden_id}: {exc.message}")
+                except Exception as exc:
+                    warnings.append(f"delete {hidden_id}: {exc}")
+            self.db.execute("DELETE FROM workload_recovery_jobs WHERE id=?", (job["id"],))
+        return warnings
+
     def diagnostics_for_task(self, task_id: str) -> list[dict]:
         fp = fingerprint_for_task(self.tasks.get(task_id))
         job = self.latest_job(fp["spec_key"])

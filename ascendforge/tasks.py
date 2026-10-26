@@ -821,20 +821,15 @@ class TaskService:
         config["codex_process_probe"] = probe
         if config.get("execution_mode") == "codex" and config.get("codex_runner_active"):
             if probe["state"] == "alive":
-                # 两阶段软暂停：先请求，runner 在安全边界确认后才变成 paused。
-                config["codex_pause_requested"] = True
-                config["codex_pause_phase"] = "requested"
-                config["codex_pause_requested_at"] = now()
-                config["codex_runner_status"] = "pause_pending"
-                self.db.execute(
-                    "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-                    (json_dumps(config), now(), task_id),
-                )
+                # 暂停必须释放 Codex 的 thread writer；保留 session_ref 和
+                # workspace，继续时新进程仍会 resume 原 thread。
+                self._terminate_codex_runner(task_id, reason=f"pause:{reason}", kill=True)
+                self._transition(task_id, TASK_PAUSED, reason=reason)
                 add_event(
                     self.db,
                     task_id,
                     None,
-                    "codex_pause_requested",
+                    "codex_runner_hard_paused",
                     {"reason": reason, "probe": probe},
                 )
                 return self.get(task_id)

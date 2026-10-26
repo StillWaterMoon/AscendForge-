@@ -123,7 +123,7 @@ Codex 正常退出不等于完成：没有导入 `specifications.json` 时记为
 
 ## 暂停与继续
 
-- 暂停：阻止新的诊断提交，保留隐藏任务、workspace 和 Codex thread。
+- 暂停：停止 Codex runner 进程树，释放 thread writer；保留隐藏任务、workspace 和 Codex thread 引用。
 - 继续：恢复原 thread/workspace；未决提交先查询原 ID，不重复发送。
 - 恢复失败不自动新建空会话。
 - 同一 `spec_key` 通过数据库部分唯一索引保证最多一个活跃逆向任务。

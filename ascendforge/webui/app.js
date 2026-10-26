@@ -965,7 +965,7 @@ function renderTaskTab(task) {
 async function pauseTask(taskId) {
   try {
     await api(`/api/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST', body: {} });
-    toast('暂停请求已发送，等待 Codex 在安全边界确认', 'success');
+    toast('任务已请求暂停', 'success');
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '暂停失败', 'error');

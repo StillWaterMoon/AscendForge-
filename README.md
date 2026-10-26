@@ -13,7 +13,7 @@
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 99 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
+> - 100 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 
 ## 为什么是这个形态
 
@@ -111,7 +111,7 @@ ascendforge/
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
   cli.py, db.py, states.py
 skills/                  CLI 启动 / 逆向评测 skill
-tests/                   99 个 unittest
+tests/                   100 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
@@ -131,9 +131,9 @@ CLI 启动时注入：
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
 - 执行模式：只保留本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入
-- 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace 和日志；running 或存在未知/发送中提交时拒绝删除，审计日志保留
+- 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace、日志以及该任务的隐藏逆向任务；running 或存在未知/发送中提交时拒绝删除，审计日志保留
 - 逆向评测数据：任务详情按钮按题目/版本/测试集指纹复用规格；无缓存时启动独立 Codex 逆向 thread/workspace，诊断提交共享 Scheduler 但不影响优化 best；只导入 `specifications.json`/`evidence.md`，不生成 tensor。详见 [逆向评测数据](docs/workload-recovery.md)
-- Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。提交限频、额度、在途、幂等和 unknown 对账仍由宿主强制执行
+- Codex 执行边界：暂停会停止 Codex runner 进程树并释放 thread writer，但保留 session_ref 和 workspace；继续时新进程 resume 原 thread。提交限频、额度、在途、幂等和 unknown 对账仍由宿主强制执行
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值

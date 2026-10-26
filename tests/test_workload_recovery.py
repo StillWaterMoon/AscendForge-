@@ -82,6 +82,14 @@ class WorkloadRecoveryTests(unittest.TestCase):
             1,
         )
 
+    def test_deleting_source_task_cleans_hidden_recovery_task(self):
+        self._start()
+        _fp, job, hidden = self._job_and_hidden()
+        warnings = self.service.cleanup_for_task(self.task["id"])
+        self.assertEqual(warnings, [])
+        self.assertIsNone(self.env.db.query_one("SELECT id FROM tasks WHERE id=?", (hidden["id"],)))
+        self.assertIsNone(self.env.db.query_one("SELECT id FROM workload_recovery_jobs WHERE id=?", (job["id"],)))
+
     def test_import_verified_and_reuse_cache_without_new_job(self):
         self._start()
         fp, job, hidden = self._job_and_hidden()
