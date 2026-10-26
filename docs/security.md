@@ -6,7 +6,7 @@
 |---|---|---|
 | AscendForge 管理员密码 | scrypt hash in SQLite | 账号接管 |
 | AscendForge 会话 | HttpOnly cookie；DB 只存 token SHA-256 | 会话劫持 |
-| 模型 API key | `credentials`（Fernet 密文）；主密钥在 DB 外 | 费用/数据泄露 |
+| CANNJudge 会话 | `credentials`（Fernet 密文）；主密钥在 DB 外 | 账号冒用/数据泄露 |
 | CANNJudge 账号会话 | 加密 Cookie + user id；不存密码 | 冒名提交 |
 | 题目/源码/评测反馈 | `data/tasks` | 知识产权/竞赛规则 |
 | 主密钥 | `secrets/master.key` 或 env | 解密全部凭据 |
@@ -26,7 +26,7 @@
 
 ### 凭据
 
-- 模型 key、CANNJudge Cookie 使用 Fernet（AES-128-CBC + HMAC）加密。
+- CANNJudge Cookie 使用 Fernet（AES-128-CBC + HMAC）加密。
 - 主密钥 32 字节 urlsafe-base64；文件权限 600；也可以由 `ASCENDFORGE_SECRET_KEY` 注入。
 - 浏览器只读取掩码；任何 API 都不返回明文 key/Cookie。
 - 密码不持久化；CANNJudge 登录只在服务器内存中短暂处理。

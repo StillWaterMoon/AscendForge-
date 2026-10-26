@@ -161,7 +161,6 @@ CLI 启动时注入：
 - Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
 - Codex 真实闭环：已在本机对 CopySign 跑通一轮（工作区修改 → snapshot → 官方提交 → 15/15 Pass → 会话/usage 记录）；结果与限制见 [Codex 真实闭环](docs/attempts/codex-loop-real-round.md)
 - 评价目标：`best_attempt_id` 只表示正确性基线；`performance_best_attempt_id` 独立按耗时比较（默认 `max_time`，可通过 `performance_metric` 改为 `avg_time`），没有耗时数据时记为“性能未知”，不会回退成 precision
-- 运行预算：`max_tokens=0` / `max_model_calls=0` 表示不限；提交上限、每日上限、尝试轮数、运行时长等仍由宿主强制执行，无限 Token 不等于无限提交
 - 父代码：新 attempt 自动注入父快照完整源码；也可用 `read_attempt_source` 按需读取
 - 父评测：同时注入父 attempt 的完整逐测试点结果和原始 `result_json`，不只给聚合值
 - 远端反馈：上下文自动包含最近一次逐测试点 `precision_ratio`/耗时；历史工具也返回 `testcase_precision`，不只给聚合最小值

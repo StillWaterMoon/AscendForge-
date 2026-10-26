@@ -40,7 +40,7 @@
 | Task | `tasks.py` | 配置校验、状态机、暂停/恢复/停止语义 |
 | Experiments | `experiments.py` | 快照/哈希、结果归一化、best、档案 |
 | Platform | `platform/` | 适配器契约、CANNJudge、连接服务 |
-| Agent | `agent/` | 协议、Provider、Runtime、工具、Prompt/Skill |
+| Agent | `agent/` | 改动审计与提交前检查（CLI 执行） |
 | Execution | `execution/` | Docker/本地执行器、能力检测 |
 | Security | `security.py` | scrypt、Fernet、会话、CSRF、登录限流 |
 
@@ -48,7 +48,7 @@
 
 1. 用户在 Web 创建任务：服务器解析题目链接 → 下载 ZIP → 保存 problem/template → 任务 `pending`。
 2. `start` → `running`，`next_action_at=now`。
-3. Worker 选取到期任务，获取租约，`AgentRuntime.step()`：
+3. Worker 只负责提交与轮询；本地 Codex runner 独立创建 attempt：
    - 检查任务状态与模型预算；
    - 取当前 attempt；没有则创建；
    - 组装上下文（题目合同、模板、历史、best、能力、预算）；
@@ -66,7 +66,7 @@
      - 超时/5xx/无 ID → `unknown`，任务 `needs_review`，冻结新提交；
      - 401 → `needs_login`；403 → `needs_review`；429 → 退避。
 7. Worker `poll_due` 按独立节奏查询；最终结果 → 归一化 → attempt `finished` → 更新 best → 评估停止条件。
-8. 下一轮 `AgentRuntime.step()` 用 result 历史创建新 attempt，父版本指向 best 或上一版本。
+8. 下一轮 Codex turn 沿用同一 app-server thread，父版本指向 best 或上一版本。
 9. `finish_task` / 预算 / 目标 / 停滞触发 `completed`。
 
 ## 4. 任务状态机
