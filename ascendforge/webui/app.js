@@ -685,6 +685,7 @@ async function renderTask(taskId) {
     </div>
 
     ${renderTaskAlert(task, quota)}
+    ${renderTestcaseOverview(task)}
 
     <div class="card">
       <div class="tabs" id="task-tabs">
@@ -1022,6 +1023,58 @@ function ojResult(normalized) {
   const label = raw === 'Wrong Answer' ? 'WA' : raw;
   const cls = /pass/i.test(raw) ? 'pass' : /(wrong|compile|runtime|error|fail)/i.test(raw) ? 'fail' : 'unknown';
   return { label, cls };
+}
+
+function renderTestcaseOverview(task) {
+  const attempts = (task.attempts || [])
+    .filter((attempt) => (attempt.normalized_json?.testcases || []).length)
+    .sort((a, b) => Number(b.ordinal || 0) - Number(a.ordinal || 0));
+  if (!attempts.length) return '';
+  const cases = new Map();
+  for (const attempt of attempts) {
+    for (const [fallbackIndex, testcase] of (attempt.normalized_json.testcases || []).entries()) {
+      const raw = testcase.raw || {};
+      const key = String(raw.testcase_id ?? testcase.index ?? fallbackIndex);
+      const index = Number.isFinite(Number(testcase.index)) ? Number(testcase.index) : fallbackIndex;
+      const numeric = (value) => (
+        value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+          ? Number(value)
+          : null
+      );
+      const time = numeric(raw.time);
+      const bestTime = numeric(raw.best_time);
+      if (!cases.has(key)) {
+        cases.set(key, {
+          index,
+          bestTime,
+          myTime: time,
+          score: raw.score,
+          status: raw.testcase_status || testcase.status || '',
+        });
+      }
+      const item = cases.get(key);
+      if (item.bestTime === null && bestTime !== null) item.bestTime = bestTime;
+      if (time !== null && (item.myTime === null || time < item.myTime)) {
+        item.myTime = time;
+        item.score = raw.score;
+        item.status = raw.testcase_status || testcase.status || '';
+      }
+    }
+  }
+  const rows = [...cases.values()].sort((a, b) => a.index - b.index);
+  const display = (value) => (value === null || value === undefined ? '—' : String(value));
+  return `<div class="card" style="margin-bottom:16px">
+    <div class="card-head"><div><h3>测试点最优时间</h3><div class="card-sub">OJ best_time 与当前任务历史最小 time；时间为平台原始数值，不做单位换算。</div></div></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>测试点</th><th>OJ 最优时间</th><th>我的最优时间</th><th>得分</th></tr></thead>
+      <tbody>${rows.map((item) => `<tr>
+        <td class="mono">#${esc(item.index + 1)}</td>
+        <td class="mono">${esc(display(item.bestTime))}</td>
+        <td class="mono">${esc(display(item.myTime))}</td>
+        <td class="mono">${esc(display(item.score))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
 }
 
 function recordCells(attempt, normalized) {
