@@ -67,6 +67,8 @@ read_official_evaluation(submission_id)
 
 恢复 session 的第一步必须是 `read_problem(url)`；宿主会在 `submit_official` 处拒绝“尚未读题”的诊断提交。诊断 attempt/submission 只存在于隐藏的 recovery task，不会出现在优化任务的尝试/提交列表里。
 
+诊断不使用 `print/stdout`。先得到 Pass 基线，再用 `if/else` 条件制造可控 WA（例如某 dtype 直接不计算）；规模可用条件余数探针分别取得 `N mod m` 后用 CRT 合并，或使用受控错误比例/radix 编码。通道、分母和取整语义未校准前不解读比例。
+
 ## 结构化导入
 
 Codex 在 workspace 写出：

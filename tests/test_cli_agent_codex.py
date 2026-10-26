@@ -32,6 +32,7 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertIn("submit_official", agents)
         self.assertIn("MUST go through", agents)
         self.assertIn("Before analyzing or submitting, call read_problem", agents)
+        self.assertIn("Do not use print/printf/stdout", agents)
         self.assertNotIn("or submit to the official judge", agents)
         (workspace / "kernel.asc").write_text("int f() { return 2; }\n")
         changes = adapter.collect_changes(workspace, baseline)

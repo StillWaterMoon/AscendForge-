@@ -698,6 +698,8 @@ def run_codex_agent(
                 "不得生成或保存大规模 tensor，不做性能刷分优化。\n"
                 "第一步必须先调用 read_problem(url)，读取完整题面和调用契约；"
                 "读题完成前不要修改文件、不要提交、不要推测输入规格。\n"
+                "禁止用 print/printf/stdout 做诊断；平台不会返回这些输出。"
+                "先建立 Pass 基线，再用 if/else 条件制造可控 Wrong Answer（例如某 dtype 直接不计算）。\n"
                 "AGENTS.md 允许通过 submit_official 提交诊断代码；禁止的是绕过宿主直接访问 CANNJudge。\n"
                 "在工作区写出 specifications.json 和 evidence.md；宿主会导入并校验。\n"
                 "诊断提交只用于恢复规格；提交时会自动标记为 diagnostic，不会影响优化任务的 best。\n"
