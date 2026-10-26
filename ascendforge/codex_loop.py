@@ -261,6 +261,9 @@ def run_codex_agent(
     elif task["status"] != "running":
         raise CodexLoopError(f"task is {task['status']}; use Web continue/start before Codex loop")
     config = dict(task.get("config") or {})
+    backend = str(config.get("cli_backend") or "codex").strip().lower()
+    if backend != "codex":
+        raise CodexLoopError(f"CLI backend {backend!r} is not implemented yet")
     token = lock_token or new_id("codexrun")
     if config.get("codex_runner_active") and config.get("codex_runner_token") not in (None, token):
         raise CodexLoopError("another Codex runner owns this task")
@@ -851,6 +854,9 @@ def run_codex_loop(
     elif task["status"] != "running":
         raise CodexLoopError(f"task is {task['status']}; use Web continue/start before Codex loop")
     config = dict(task.get("config") or {})
+    backend = str(config.get("cli_backend") or "codex").strip().lower()
+    if backend != "codex":
+        raise CodexLoopError(f"CLI backend {backend!r} is not implemented yet")
     token = lock_token or new_id("codexrun")
     if config.get("codex_runner_active") and config.get("codex_runner_token") not in (None, token):
         raise CodexLoopError("another Codex runner owns this task")

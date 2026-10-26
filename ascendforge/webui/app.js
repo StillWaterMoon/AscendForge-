@@ -390,7 +390,6 @@ async function renderDashboard() {
   const attention = (counts.needs_login || 0) + (counts.needs_review || 0);
   const worker = summary.worker || {};
   const platform = summary.platform || {};
-  const model = summary.model || {};
   $('#view').innerHTML = `
     <div class="row-between" style="margin-bottom:18px">
       <div>
@@ -404,10 +403,10 @@ async function renderDashboard() {
     </div>
 
     ${attention ? `<div class="alert warn" style="margin-bottom:16px">有 ${attention} 个任务需要处理（登录失效或结果未知），提交调度已暂停。请进入任务详情处理。</div>` : ''}
-    ${!worker.alive ? `<div class="alert warn" style="margin-bottom:16px">后台 worker 未运行。网页操作会保存状态，但不会推进模型调用或提交。请在服务器启动 <span class="mono">ascendforge worker</span>。</div>` : ''}
+    ${!worker.alive ? `<div class="alert warn" style="margin-bottom:16px">后台 worker 未运行。网页操作会保存状态，但不会推进提交或结果轮询。请在服务器启动 <span class="mono">ascendforge worker</span>。</div>` : ''}
 
     <div class="grid grid-4" style="margin-bottom:16px">
-      <div class="metric"><div class="metric-label">运行中</div><div class="metric-value">${esc(counts.running || 0)}</div><div class="metric-note">模型/提交循环</div></div>
+      <div class="metric"><div class="metric-label">运行中</div><div class="metric-value">${esc(counts.running || 0)}</div><div class="metric-note">CLI / 提交循环</div></div>
       <div class="metric"><div class="metric-label">需处理</div><div class="metric-value" style="color:${attention ? 'var(--accent)' : 'inherit'}">${esc(attention)}</div><div class="metric-note">登录或未知提交</div></div>
       <div class="metric"><div class="metric-label">已完成</div><div class="metric-value">${esc(counts.completed || 0)}</div><div class="metric-note">含无提升完成</div></div>
       <div class="metric"><div class="metric-label">全部任务</div><div class="metric-value">${esc(tasks.length)}</div><div class="metric-note">持久化于服务器</div></div>
@@ -416,8 +415,8 @@ async function renderDashboard() {
     <div class="card" style="margin-bottom:16px">
       <div class="row" style="gap:22px">
         <div class="small"><span class="faint">CANNJudge：</span>${platform.connected ? badge('已连接', 'completed') : badge('未连接', 'pending')} <span class="muted">${esc(platform.account_masked || '')}</span></div>
-        <div class="small"><span class="faint">模型：</span>${model.configured ? badge(model.model || '已配置', 'running') : badge('未配置', 'pending')}</div>
-        <div class="small"><span class="faint">执行器：</span><span class="mono">${esc(summary.capabilities?.executor || '—')}</span></div>
+        <div class="small"><span class="faint">执行器：</span>${badge('本地 CLI', 'running')} <span class="mono">Codex</span></div>
+        <div class="small"><span class="faint">服务器执行：</span><span class="mono">${esc(summary.capabilities?.executor || '—')}</span></div>
         <div class="small"><span class="faint">NPU：</span>${summary.capabilities?.npu === 'available' ? badge('可用', 'completed') : badge('不可用', 'pending')}</div>
         <div class="small"><span class="faint">Worker：</span>${worker.alive ? badge('在线', 'completed') : badge('离线', 'failed')}</div>
       </div>
@@ -452,7 +451,7 @@ async function renderDashboard() {
             </div>
           </article>`;
         }).join('')}
-      </div>` : `<div class="empty">还没有任务。先连接 CANNJudge 与模型，再新建一个题目任务。</div>`}
+      </div>` : `<div class="empty">还没有任务。先连接 CANNJudge，再新建一个 CLI 优化任务。</div>`}
     </div>`;
 
   $('#new-task').addEventListener('click', () => openNewTaskModal().catch((e) => toast(e.message || '打开表单失败', 'error')));
@@ -556,9 +555,8 @@ async function uploadProjectTemplate(file) {
 }
 
 async function openNewTaskModal() {
-  const [platformData, modelData] = await Promise.all([api('/api/platform/status'), api('/api/settings/model')]);
+  const platformData = await api('/api/platform/status');
   const connected = platformData.platform?.connected;
-  const configured = modelData.model?.configured;
   openModal('新建优化任务', `
     ${!connected ? `<div class="alert warn">CANNJudge 尚未连接。任务创建会先验证账号能否连接 judge。<a href="#/settings" data-close-and-go="#/settings">前往连接</a></div>` : ''}
     <form id="new-task-form" class="stack">
@@ -566,53 +564,26 @@ async function openNewTaskModal() {
         <div class="field span-2"><label for="nt-title">任务标题</label><input id="nt-title" type="text" maxlength="120" placeholder="例如：Add 核函数 · 第一轮优化" required></div>
         <div class="field span-2"><label for="nt-url">CANNJudge 题目链接</label><input id="nt-url" type="url" placeholder="https://cannjudge.cn/hc_cann_codelabs/cann/add" required>
           <div class="hint">必须是完整的小组/比赛/题目链接；用于读取题面和官方提交。</div></div>
-        <div class="field span-2"><label>执行模式</label>
-          <div class="segmented">
-            <label><input type="radio" name="nt-mode" value="api"> LLM API</label>
-            <label><input type="radio" name="nt-mode" value="codex" checked> 本地 Codex</label>
-          </div>
-          <div class="hint" id="nt-mode-hint">使用设置页配置的模型 API，由服务器 Agent 循环执行。</div>
+        <div class="field span-2"><label for="nt-cli">CLI 运行器</label>
+          <select id="nt-cli">
+            <option value="codex" selected>Codex CLI（当前可用）</option>
+            <option value="deepseek-harness" disabled>DeepSeek Harness（预留）</option>
+            <option value="claude-code" disabled>Claude Code（预留）</option>
+          </select>
+          <div class="hint">当前任务固定由本地 CLI 执行；CLI 使用自己的认证，不需要模型 API Key。</div>
         </div>
         <div class="field span-2"><label for="nt-strategy">题目策略（可选）</label>
           <textarea id="nt-strategy" rows="4" maxlength="8000" placeholder="例如：本题进入性能优化阶段，重点研究 UB 分块与 DataCopy 重叠；先保证 int8/int16/int32/fp16/fp32 全部正确，再优化。"></textarea>
           <div class="hint">只放题目目标、约束和待验证假设。</div>
         </div>
       </div>
-      <div id="nt-api-pane" class="stack">
-        ${!configured ? `<div class="alert warn">模型 API 尚未配置。可以创建任务，但启动后需要模型才能推进。<a href="#/settings" data-close-and-go="#/settings">前往配置</a></div>` : ''}
-      <details class="advanced">
-        <summary>预算与调度（可选）</summary>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>每题提交上限（0 = 不限）</label><input id="cfg-max-task-subs" type="number" min="0" value="30"></div>
-          <div class="field"><label>每日提交上限（0 = 不限）</label><input id="cfg-max-day-subs" type="number" min="0" value="20"></div>
-          <div class="field"><label>最小提交间隔（秒，≥60）</label><input id="cfg-interval" type="number" min="60" value="300"></div>
-          <div class="field"><label>同账号在途提交上限</label><input id="cfg-inflight" type="number" min="1" max="3" value="1"></div>
-          <div class="field"><label>最多尝试轮数</label><input id="cfg-max-attempts" type="number" min="1" value="30"></div>
-          <div class="field"><label>最多模型调用</label><input id="cfg-max-calls" type="number" min="1" value="120"></div>
-          <div class="field"><label>Token 上限</label><input id="cfg-max-tokens" type="number" min="1000" value="3000000"></div>
-          <div class="field"><label>费用上限（可选，需配单价）</label><input id="cfg-max-cost" type="number" min="0" step="0.0001" placeholder="不设置"></div>
-          <div class="field"><label>总运行时限（秒）</label><input id="cfg-max-runtime" type="number" min="60" value="21600"></div>
-          <div class="field"><label>停滞轮数停止</label><input id="cfg-max-stall" type="number" min="1" value="5"></div>
-          <div class="field"><label>指标</label><select id="cfg-metric">
-            <option value="auto">自动（score / precision_ratio）</option>
-            <option value="score">score 越高越好</option>
-            <option value="precision_ratio">precision_ratio 越高越好</option>
-            <option value="time">time 越低越好</option>
-            <option value="none">不比较指标</option>
-          </select></div>
-          <div class="field"><label>目标成绩（可选）</label><input id="cfg-target" type="number" step="any" placeholder="达到后停止"></div>
-          <div class="field"><label>time 指标单位（仅 time 时必填）</label><input id="cfg-time-unit" type="text" placeholder="例如 ms（平台未声明请勿猜）"></div>
-          <div class="field"><label>Agent 每轮最多步骤</label><input id="cfg-agent-steps" type="number" min="1" max="30" value="10"></div>
-        </div>
-      </details>
-      </div>
-      <div id="nt-codex-pane" class="stack" hidden>
+      <div id="nt-cli-pane" class="stack">
         <div class="field"><label for="nt-project">项目模板 ZIP（可选）</label><input id="nt-project" type="file" accept=".zip,application/zip">
-          <div class="hint">上传后 Codex 从该工程开始；不上传就是空项目，由 Codex 从 0 创建。</div></div>
-        <div class="field"><label for="nt-codex-prompt">Codex 初始指令（可选）</label>
+          <div class="hint">上传后从该工程开始；不上传就是空项目，由 CLI 从 0 创建。</div></div>
+        <div class="field"><label for="nt-codex-prompt">初始指令（可选）</label>
           <textarea id="nt-codex-prompt" rows="4" maxlength="8000" placeholder="例如：先阅读题面，检查模板；优先保证全部 dtype 正确，再优化性能。"></textarea>
         </div>
-        <div class="alert info">创建任务后会自动新建 Codex 会话并发送初始 skill。启动时注入真实 SKILL.md 与 TOOLS.md；会话由 AscendForge 托管。</div>
+        <div class="alert info">创建任务后自动启动本地 CLI 会话。启动时注入真实 SKILL.md 与 TOOLS.md；会话由 AscendForge 托管。</div>
       </div>
       <div class="alert error" id="new-task-error" hidden></div>
       <div class="form-actions">
@@ -620,22 +591,6 @@ async function openNewTaskModal() {
         <button class="btn btn-primary" type="submit">导入题目并创建</button>
       </div>
     </form>`);
-  const applyMode = (mode) => {
-    const apiPane = $('#nt-api-pane');
-    const codexPane = $('#nt-codex-pane');
-    if (apiPane) apiPane.hidden = mode !== 'api';
-    if (codexPane) codexPane.hidden = mode !== 'codex';
-    const hint = $('#nt-mode-hint');
-    if (hint) {
-      hint.textContent = mode === 'api'
-        ? '使用设置页配置的模型 API，由服务器 Agent 循环执行。'
-        : '使用本机 Codex CLI；创建任务后自动建立会话并发送初始 skill。';
-    }
-  };
-  $$('input[name="nt-mode"]').forEach((input) => {
-    input.addEventListener('change', () => applyMode(input.value));
-  });
-  applyMode('codex');
   $('#new-task-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorBox = $('#new-task-error');
@@ -643,64 +598,34 @@ async function openNewTaskModal() {
     const button = event.target.querySelector('button[type="submit"]');
     button.disabled = true;
     button.textContent = '正在创建任务…';
-    const mode = $('input[name="nt-mode"]:checked').value;
-    const config = { execution_mode: mode };
-    const putNum = (id, key, integer = true) => {
-      const raw = $(id).value.trim();
-      if (raw === '') return;
-      const value = Number(raw);
-      if (!Number.isFinite(value)) return;
-      config[key] = integer ? Math.trunc(value) : value;
-    };
-    if (mode === 'api') {
-      putNum('#cfg-max-task-subs', 'max_submissions_per_task');
-      putNum('#cfg-max-day-subs', 'max_submissions_per_day');
-      putNum('#cfg-interval', 'min_submit_interval_sec');
-      putNum('#cfg-inflight', 'max_inflight');
-      putNum('#cfg-max-attempts', 'max_attempts');
-      putNum('#cfg-max-calls', 'max_model_calls');
-      putNum('#cfg-max-tokens', 'max_tokens');
-      putNum('#cfg-max-runtime', 'max_runtime_sec');
-      putNum('#cfg-max-stall', 'max_stall_rounds');
-      putNum('#cfg-agent-steps', 'agent_max_steps');
-      putNum('#cfg-max-cost', 'max_cost', false);
-      putNum('#cfg-target', 'target_score', false);
-      config.metric = $('#cfg-metric').value;
-      if ($('#cfg-time-unit').value.trim()) config.time_unit = $('#cfg-time-unit').value.trim();
-    }
+    const cliBackend = $('#nt-cli').value;
+    const config = { execution_mode: 'codex', cli_backend: cliBackend };
     if ($('#nt-strategy').value.trim()) config.strategy_prompt = $('#nt-strategy').value.trim();
     try {
       let projectUploadId = null;
-      if (mode === 'codex') {
-        const file = $('#nt-project').files?.[0];
-        if (file) {
-          button.textContent = '正在上传项目模板…';
-          const uploaded = await uploadProjectTemplate(file);
-          projectUploadId = uploaded.upload_id;
-        }
-        button.textContent = '正在创建 Codex 会话…';
-      } else {
-        button.textContent = '正在创建任务…';
+      const file = $('#nt-project').files?.[0];
+      if (file) {
+        button.textContent = '正在上传项目模板…';
+        const uploaded = await uploadProjectTemplate(file);
+        projectUploadId = uploaded.upload_id;
       }
+      button.textContent = '正在创建 CLI 会话…';
       const data = await api('/api/tasks', {
         method: 'POST',
         body: {
           title: $('#nt-title').value.trim(),
           problem_url: $('#nt-url').value.trim(),
-          execution_mode: mode,
+          execution_mode: 'codex',
+          cli_backend: cliBackend,
           project_upload_id: projectUploadId,
-          codex_prompt: mode === 'codex' ? $('#nt-codex-prompt').value : '',
+          codex_prompt: $('#nt-codex-prompt').value,
           config,
         },
         requestId: uuid(),
       });
       closeModal();
-      if (mode === 'codex') {
-        const codexError = data.task?.codex_start_error;
-        toast(codexError ? `任务已创建，但 Codex 启动失败：${codexError}` : '任务已创建，Codex 会话已启动', codexError ? 'error' : 'success');
-      } else {
-        toast('任务已创建，使用 LLM API 模式', 'success');
-      }
+      const startError = data.task?.codex_start_error;
+      toast(startError ? `任务已创建，但 CLI 启动失败：${startError}` : '任务已创建，CLI 会话已启动', startError ? 'error' : 'success');
       navigate(`#/tasks/${data.task.id}`);
     } catch (err) {
       errorBox.hidden = false;
@@ -806,25 +731,14 @@ async function renderTask(taskId) {
       ${task.experiment.hypothesis ? `<span class="experiment-hypothesis" title="${esc(task.experiment.hypothesis)}">${esc(String(task.experiment.hypothesis).slice(0, 120))}</span>` : ''}
     </div>` : ''}
 
-    <div class="grid grid-5" style="margin-bottom:16px">
+    <div class="grid grid-4" style="margin-bottom:16px">
       <div class="metric"><div class="metric-label">正确性基线</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '保留的通过参考实现' : '暂无')}</div></div>
       <div class="metric"><div class="metric-label">性能最好</div><div class="metric-value small">${renderPerformanceBest(task)}</div><div class="metric-note">${esc(task.performance_best ? `${task.performance_best.metric} · ${task.performance_best.samples || 0} 个测试点` : '性能未知')}</div></div>
-      <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">尝试上限 ${esc(config.max_attempts ?? '—')} · 提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>
-      <div class="metric"><div class="metric-label">下一次提交</div><div class="metric-value small">${esc(quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待 agent')}</div><div class="metric-note">间隔 ${esc(config.min_submit_interval_sec ?? '—')}s · 在途 ${esc(quota.inflight ?? 0)}</div></div>
-      <div class="metric"><div class="metric-label">模型用量</div><div class="metric-value small">${esc(usage.calls ?? 0)} 次</div><div class="metric-note">${esc(usage.total_tokens ?? 0)} tokens · ${usage.cost_complete ? esc(formatCost(usage.known_cost)) : '费用未知'}</div></div>
+      <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>
+      <div class="metric"><div class="metric-label">下一次提交</div><div class="metric-value small">${esc(quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待 CLI')}</div><div class="metric-note">间隔 ${esc(config.min_submit_interval_sec ?? '—')}s · 在途 ${esc(quota.inflight ?? 0)}</div></div>
     </div>
 
     <div class="grid grid-2" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-head"><h3>运行预算</h3><span class="row" style="gap:10px"><span class="faint small">服务器强制执行</span><button class="btn btn-sm btn-ghost" data-budget="1" type="button">调整上限</button></span></div>
-        ${budgetBar('模型调用', usage.calls || 0, config.max_model_calls)}
-        ${budgetBar('Tokens', usage.total_tokens || 0, config.max_tokens)}
-        ${config.max_cost !== null && config.max_cost !== undefined ? budgetBar('费用（已知）', Number(usage.known_cost || 0), Number(config.max_cost), usage.cost_complete ? '' : '未知费用不可当作 0') : '<div class="faint small">未设置费用上限；费用按调用数/token/时间约束。</div>'}
-        <div class="row" style="margin-top:12px; gap:18px">
-          <span class="small muted">运行 ${esc(fmtDuration(task.budget?.runtime_sec ?? 0))} / ${esc(fmtDuration(config.max_runtime_sec ?? 0))}</span>
-          <span class="small muted">停滞 ${esc(task.budget?.stall_rounds ?? 0)} / ${esc(config.max_stall_rounds ?? '—')} 轮</span>
-        </div>
-      </div>
       <div class="card">
         <div class="card-head"><h3>调度与设备</h3></div>
         <div class="stack small">
@@ -1504,14 +1418,16 @@ function openResolveModal(taskId, submissionId) {
 /* ------------------------------------------------------------------ */
 async function renderConnections() {
   setPoll(null);
-  const [data, platformData] = await Promise.all([api('/api/settings/model'), api('/api/platform/status')]);
-  const model = data.model || {};
+  const [data, platformData, skillData] = await Promise.all([
+    api('/api/capabilities'),
+    api('/api/platform/status'),
+    api('/api/skills'),
+  ]);
   const platform = platformData.platform || {};
-  state.model = model;
   state.platform = platform;
-  state.capabilities = data.capabilities;
-  state.skills = data.skills || [];
-  const caps = data.capabilities || {};
+  state.capabilities = data.capabilities || data;
+  state.skills = skillData.skills || [];
+  const caps = state.capabilities || {};
   $('#view').innerHTML = `
     <div class="row-between" style="margin-bottom:18px">
       <div><h1>连接与设置</h1><div class="muted">CANNJudge 用于官方题目与提交；本地 Codex 使用本机 Codex CLI 认证，不需要模型 API Key。</div></div>
@@ -1548,33 +1464,15 @@ async function renderConnections() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><div><h2>LLM API（可选）</h2><div class="card-sub">只给“LLM API”执行模式使用；本地 Codex 模式不读取这里的 API Key。</div></div>
-        ${model.configured ? badge('已配置', 'completed') : badge('未配置', 'pending')}</div>
-      <form id="model-form" class="stack">
-        <div class="form-grid">
-          <div class="field span-2"><label for="m-base">API base URL</label><input id="m-base" type="url" value="${esc(model.base_url || '')}" placeholder="https://your-relay.example.com/v1" required>
-            <div class="hint">可填到 /v1 或完整 /chat/completions；服务端不会猜测其他协议。</div></div>
-          <div class="field"><label for="m-model">模型名称</label><input id="m-model" type="text" value="${esc(model.model || '')}" placeholder="deepseek-chat" required></div>
-          <div class="field"><label for="m-key">API Key</label><input id="m-key" type="password" autocomplete="off" placeholder="${model.configured ? '留空保持现有密钥（' + esc(model.api_key_masked || '') + '）' : '粘贴 API Key'}">
-            <div class="hint">不写入浏览器存储，不进入提示词或实验档案。</div></div>
-          <div class="field"><label for="m-maxtok">max_tokens</label><input id="m-maxtok" type="number" min="16" max="32768" value="${esc(model.max_tokens || 2048)}"></div>
-          <div class="field"><label for="m-temp">temperature</label><input id="m-temp" type="number" min="0" max="2" step="0.05" value="${esc(model.temperature ?? 0.2)}"></div>
-          <div class="field"><label for="m-timeout">请求超时（秒）</label><input id="m-timeout" type="number" min="10" max="600" value="${esc(model.timeout || 120)}"></div>
-          <div class="field"><label for="m-reasoning">推理模式</label><select id="m-reasoning">
-            <option value="auto" ${model.reasoning_mode === 'disabled' ? '' : 'selected'}>自动</option>
-            <option value="disabled" ${model.reasoning_mode === 'disabled' ? 'selected' : ''}>禁用长推理（推荐给工具 Agent）</option>
-          </select><div class="hint">部分 deepseek-flash/Qwen 网关会先进行长推理；禁用后直接输出工具调用。</div></div>
-          <div class="field"><label for="m-price-p">输入单价 / 1K tokens（可选）</label><input id="m-price-p" type="number" min="0" step="0.000001" value="${esc(model.price_prompt_per_1k ?? '')}"></div>
-          <div class="field"><label for="m-price-c">输出单价 / 1K tokens（可选）</label><input id="m-price-c" type="number" min="0" step="0.000001" value="${esc(model.price_completion_per_1k ?? '')}"></div>
-          <div class="field span-2"><label class="checkbox"><input id="m-tools" type="checkbox" ${model.supports_tool_calls ? 'checked' : ''}> 该模型/网关支持原生 tool calling（不支持时使用 JSON 动作协议）</label></div>
-        </div>
-        <div class="alert error" id="model-error" hidden></div>
-        <div class="form-actions">
-          ${model.configured ? '<button class="btn btn-danger" id="model-delete" type="button">删除配置</button>' : ''}
-          <button class="btn" id="model-test" type="button">测试连接</button>
-          <button class="btn btn-primary" type="submit">保存配置</button>
-        </div>
-      </form>
+      <div class="card-head"><div><h2>CLI 运行器</h2><div class="card-sub">当前只启用本机 Codex CLI；不在这里保存任何模型 API Key。</div></div>
+        ${badge('Codex CLI', 'completed')}</div>
+      <div class="stack small">
+        <div class="row-between"><span class="muted">当前运行器</span><span class="mono">Codex CLI</span></div>
+        <div class="row-between"><span class="muted">认证来源</span><span>本机 Codex 登录 / 配置</span></div>
+        <div class="row-between"><span class="muted">DeepSeek Harness</span><span>${badge('预留', 'pending')}</span></div>
+        <div class="row-between"><span class="muted">Claude Code</span><span>${badge('预留', 'pending')}</span></div>
+      </div>
+      <div class="alert info small" style="margin-top:12px">运行器由任务配置中的 <span class="mono">cli_backend</span> 指定；目前只接受 <span class="mono">codex</span>，以后接入其他 CLI 时保持同一工具合同。</div>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px">
@@ -1659,48 +1557,6 @@ async function renderConnections() {
     await renderConnections();
   });
 
-  $('#model-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#model-error');
-    errorBox.hidden = true;
-    try {
-      await api('/api/settings/model', {
-        method: 'PUT',
-        body: {
-          base_url: $('#m-base').value.trim(),
-          model: $('#m-model').value.trim(),
-          api_key: $('#m-key').value,
-          supports_tool_calls: $('#m-tools').checked,
-          max_tokens: Number($('#m-maxtok').value),
-          temperature: Number($('#m-temp').value),
-          timeout: Number($('#m-timeout').value),
-          reasoning_mode: $('#m-reasoning').value,
-          price_prompt_per_1k: $('#m-price-p').value === '' ? null : Number($('#m-price-p').value),
-          price_completion_per_1k: $('#m-price-c').value === '' ? null : Number($('#m-price-c').value),
-        },
-      });
-      toast('模型配置已保存', 'success');
-      await renderConnections();
-    } catch (err) {
-      errorBox.hidden = false; errorBox.className = 'alert error'; errorBox.textContent = err.message;
-    }
-  });
-  $('#model-test').addEventListener('click', async (event) => {
-    const button = event.target;
-    button.disabled = true; button.textContent = '测试中…';
-    try {
-      const result = await api('/api/settings/model/test', { method: 'POST', body: {}, idem: false });
-      toast(`连接成功 · ${result.model} · ${result.latency_ms}ms`, 'success');
-    } catch (err) { toast(err.message || '连接失败', 'error'); }
-    button.disabled = false; button.textContent = '测试连接';
-  });
-  const del = $('#model-delete');
-  if (del) del.addEventListener('click', async () => {
-    if (!confirm('删除模型配置？')) return;
-    await api('/api/settings/model', { method: 'DELETE' });
-    toast('已删除', 'success');
-    renderConnections();
-  });
   $('#password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {

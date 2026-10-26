@@ -74,6 +74,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "max_local_seconds": 30,
     "prompt_version": "v1",
     "execution_mode": "api",
+    "cli_backend": "codex",
     "codex_runner_active": False,
     "codex_runner_pid": None,
     "codex_runner_status": None,
@@ -290,6 +291,9 @@ def normalize_config(raw: dict | None, *, base: dict | None = None) -> dict:
     if config["metric"] == "time" and not config.get("time_unit"):
         raise TaskError("BAD_CONFIG", "使用 time 指标时必须明确 time_unit（平台时间单位未被假定）")
     config["prompt_version"] = str(config.get("prompt_version") or "v1")[:32]
+    config["cli_backend"] = str(config.get("cli_backend") or "codex").strip().lower()
+    if config["cli_backend"] != "codex":
+        raise TaskError("CLI_BACKEND_NOT_AVAILABLE", f"CLI 运行器 {config['cli_backend']} 尚未接入")
     config["manual_only"] = bool(config.get("manual_only", False))
     strategy = config.get("strategy_prompt") or ""
     if not isinstance(strategy, str):

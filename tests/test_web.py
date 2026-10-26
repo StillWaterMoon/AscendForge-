@@ -97,6 +97,8 @@ class WebTests(unittest.TestCase):
             html = response.read()
         self.assertEqual(response.status, 200)
         self.assertIn(b"AscendForge", html)
+        self.assertIn("连接与设置".encode("utf-8"), html)
+        self.assertNotIn(b"#/backups", html)
         with urllib.request.urlopen(self.base + "/static/app.js", timeout=20) as response:
             js = response.read()
         self.assertIn(b"renderDashboard", js)

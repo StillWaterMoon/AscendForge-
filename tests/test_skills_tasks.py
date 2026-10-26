@@ -167,6 +167,12 @@ class TaskStateTests(unittest.TestCase):
             self.env.tasks.delete(task["id"])
         self.assertEqual(raised.exception.code, "TASK_RUNNING")
 
+    def test_reserved_cli_backend_is_rejected(self):
+        with self.assertRaises(TaskError) as raised:
+            normalize_config({"cli_backend": "claude-code"})
+        self.assertEqual(raised.exception.code, "CLI_BACKEND_NOT_AVAILABLE")
+        self.assertEqual(normalize_config({"cli_backend": "codex"})["cli_backend"], "codex")
+
     def test_config_validation(self):
         with self.assertRaises(TaskError):
             normalize_config({"max_inflight": 9})

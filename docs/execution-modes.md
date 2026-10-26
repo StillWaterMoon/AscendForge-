@@ -1,6 +1,6 @@
 # 执行模式
 
-新建任务时必须选择一种执行模式，两种模式的字段和行为不同。
+当前 Web UI 只暴露本地 CLI（Codex）。LLM API 后端代码暂时保留，但不再作为新建任务或设置页的选项；`cli_backend` 为后续 DeepSeek Harness / Claude Code 预留，目前只接受 `codex`。
 
 ## LLM API
 

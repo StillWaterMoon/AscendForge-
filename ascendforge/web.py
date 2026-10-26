@@ -791,6 +791,10 @@ class Handler(BaseHTTPRequestHandler):
         config = body.get("config") if isinstance(body.get("config"), dict) else {}
         config = dict(config)
         config["execution_mode"] = execution_mode
+        if execution_mode == "codex":
+            config["cli_backend"] = str(body.get("cli_backend") or config.get("cli_backend") or "codex").strip().lower()
+            if config["cli_backend"] != "codex":
+                raise ApiError(400, "CLI_BACKEND_NOT_AVAILABLE", f"CLI 运行器 {config['cli_backend']} 尚未接入")
         task = self.app.tasks.create(
             title=str(body.get("title") or ""),
             problem_url=str(body.get("problem_url") or ""),
