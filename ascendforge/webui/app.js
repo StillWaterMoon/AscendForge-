@@ -342,7 +342,7 @@ function renderSetup(message = '') {
       state.csrf = data.csrf_token;
       await showShell();
       toast('初始化完成', 'success');
-      location.hash = '#/platform';
+      location.hash = '#/settings';
       route();
       startWorkerPolling();
     } catch (err) {
@@ -362,13 +362,11 @@ async function route() {
   const view = parts[0] || 'dashboard';
   state.route = view;
   state.taskId = parts[1] || null;
-  setActiveNav(view === 'tasks' ? 'dashboard' : view);
+  setActiveNav(view === 'tasks' ? 'dashboard' : (view === 'platform' || view === 'settings' ? 'connections' : view));
   try {
     if (view === 'dashboard') await renderDashboard();
     else if (view === 'tasks' && state.taskId) await renderTask(state.taskId);
-    else if (view === 'settings') await renderSettings();
-    else if (view === 'platform') await renderPlatform();
-    else if (view === 'backups') await renderBackups();
+    else if (view === 'settings' || view === 'platform') await renderConnections();
     else { location.hash = '#/dashboard'; }
   } catch (err) {
     if (!err.handled) {
@@ -562,7 +560,7 @@ async function openNewTaskModal() {
   const connected = platformData.platform?.connected;
   const configured = modelData.model?.configured;
   openModal('新建优化任务', `
-    ${!connected ? `<div class="alert warn">CANNJudge 尚未连接。任务创建会先验证账号能否连接 judge。<a href="#/platform" data-close-and-go="#/platform">前往连接</a></div>` : ''}
+    ${!connected ? `<div class="alert warn">CANNJudge 尚未连接。任务创建会先验证账号能否连接 judge。<a href="#/settings" data-close-and-go="#/settings">前往连接</a></div>` : ''}
     <form id="new-task-form" class="stack">
       <div class="form-grid">
         <div class="field span-2"><label for="nt-title">任务标题</label><input id="nt-title" type="text" maxlength="120" placeholder="例如：Add 核函数 · 第一轮优化" required></div>
@@ -570,8 +568,8 @@ async function openNewTaskModal() {
           <div class="hint">必须是完整的小组/比赛/题目链接；用于读取题面和官方提交。</div></div>
         <div class="field span-2"><label>执行模式</label>
           <div class="segmented">
-            <label><input type="radio" name="nt-mode" value="api" checked> LLM API</label>
-            <label><input type="radio" name="nt-mode" value="codex"> 本地 Codex</label>
+            <label><input type="radio" name="nt-mode" value="api"> LLM API</label>
+            <label><input type="radio" name="nt-mode" value="codex" checked> 本地 Codex</label>
           </div>
           <div class="hint" id="nt-mode-hint">使用设置页配置的模型 API，由服务器 Agent 循环执行。</div>
         </div>
@@ -614,7 +612,7 @@ async function openNewTaskModal() {
         <div class="field"><label for="nt-codex-prompt">Codex 初始指令（可选）</label>
           <textarea id="nt-codex-prompt" rows="4" maxlength="8000" placeholder="例如：先阅读题面，检查模板；优先保证全部 dtype 正确，再优化性能。"></textarea>
         </div>
-        <div class="alert info">创建任务后会自动新建 Codex 会话并发送初始 skill。当前 skill 为占位内容：<span class="mono">HELLO！ HELLO</span>。</div>
+        <div class="alert info">创建任务后会自动新建 Codex 会话并发送初始 skill。启动时注入真实 SKILL.md 与 TOOLS.md；会话由 AscendForge 托管。</div>
       </div>
       <div class="alert error" id="new-task-error" hidden></div>
       <div class="form-actions">
@@ -637,7 +635,7 @@ async function openNewTaskModal() {
   $$('input[name="nt-mode"]').forEach((input) => {
     input.addEventListener('change', () => applyMode(input.value));
   });
-  applyMode('api');
+  applyMode('codex');
   $('#new-task-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorBox = $('#new-task-error');
@@ -711,7 +709,7 @@ async function openNewTaskModal() {
       button.disabled = false;
       button.textContent = '创建任务';
       if (err.code === 'ACCOUNT_CANNOT_CONNECT_JUDGE') {
-        errorBox.innerHTML += ' <a href="#/platform" data-close-and-go="#/platform">前往平台连接</a>';
+        errorBox.innerHTML += ' <a href="#/settings" data-close-and-go="#/settings">前往平台连接</a>';
       }
     }
   });
@@ -1131,7 +1129,7 @@ function renderTaskAlert(task, quota) {
     return `<div class="alert warn" style="margin-bottom:16px">原会话正被另一个 Codex 进程占用，暂时无法恢复。请在占用端结束该会话的使用并释放占用后重试。原会话与工作区已保留。<div class="faint small" style="margin-top:6px">${esc(task.last_error || '')}</div></div>`;
   }
   if (task.status === 'needs_login') {
-    return `<div class="alert warn" style="margin-bottom:16px">CANNJudge 登录失效，新的模型调用/提交已暂停，已在途的结果仍会收集。请前往 <a href="#/platform">平台连接</a> 重新登录，然后恢复任务。${task.last_error ? `<div class="faint small" style="margin-top:6px">${esc(task.last_error)}</div>` : ''}</div>`;
+    return `<div class="alert warn" style="margin-bottom:16px">CANNJudge 登录失效，新的模型调用/提交已暂停，已在途的结果仍会收集。请前往 <a href="#/settings">平台连接</a> 重新登录，然后恢复任务。${task.last_error ? `<div class="faint small" style="margin-top:6px">${esc(task.last_error)}</div>` : ''}</div>`;
   }
   if (task.status === 'needs_review') {
     return `<div class="alert warn" style="margin-bottom:16px">任务需要人工审查：${esc(task.last_error || '存在未知提交或模型配置问题')}。处理完成后点击“恢复”。</div>`;
@@ -1504,21 +1502,53 @@ function openResolveModal(taskId, submissionId) {
 /* ------------------------------------------------------------------ */
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
-async function renderSettings() {
+async function renderConnections() {
   setPoll(null);
-  const data = await api('/api/settings/model');
+  const [data, platformData] = await Promise.all([api('/api/settings/model'), api('/api/platform/status')]);
   const model = data.model || {};
+  const platform = platformData.platform || {};
   state.model = model;
+  state.platform = platform;
   state.capabilities = data.capabilities;
   state.skills = data.skills || [];
   const caps = data.capabilities || {};
   $('#view').innerHTML = `
     <div class="row-between" style="margin-bottom:18px">
-      <div><h1>模型与设置</h1><div class="muted">模型 API 只负责推理；工具由服务器校验并执行。</div></div>
+      <div><h1>连接与设置</h1><div class="muted">CANNJudge 用于官方题目与提交；本地 Codex 使用本机 Codex CLI 认证，不需要模型 API Key。</div></div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><div><h2>模型 Provider</h2><div class="card-sub">兼容 OpenAI Chat Completions；密钥加密保存在服务器，浏览器只看到掩码。</div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><div><h2>CANNJudge 平台连接</h2><div class="card-sub">官方题面读取、提交和结果查询仍然必须经过平台账号。</div></div>
+        ${platform.connected ? badge('已连接', 'completed') : badge('未连接', 'pending')}</div>
+      ${platform.last_error ? `<div class="alert error" style="margin-bottom:12px">${esc(platform.last_error.message || JSON.stringify(platform.last_error))}</div>` : ''}
+      ${platform.connected ? `
+        <div class="stack small">
+          <div class="row-between"><span class="muted">账号</span><span class="mono">${esc(platform.account_masked || '—')}</span></div>
+          <div class="row-between"><span class="muted">Judge 题目访问</span><span>${platform.judge_verified ? badge('已验证', 'completed') : badge('未验证', 'pending')}</span></div>
+        </div>
+        <div class="toolbar" style="margin-top:14px">
+          <button class="btn" id="platform-test" type="button">测试当前连接</button>
+          <button class="btn btn-danger" id="platform-disconnect" type="button">断开并清除会话</button>
+        </div>
+        <div id="evidence-box" class="mt-12"></div>
+      ` : `
+        <form id="platform-form" class="stack">
+          <div class="form-grid">
+            <div class="field"><label for="p-account">CANNJudge 账号（邮箱或手机号）</label><input id="p-account" type="text" autocomplete="username" required></div>
+            <div class="field"><label for="p-password">密码</label><input id="p-password" type="password" autocomplete="current-password" required></div>
+            <div class="field span-2"><label for="p-problem">用于验证 judge 访问的题目链接</label><input id="p-problem" type="url" value="https://cannjudge.cn/hc_cann_codelabs/cann/add"></div>
+            <div class="field"><label for="p-captcha-code">验证码（平台要求时）</label><input id="p-captcha-code" type="text" placeholder="验证码"></div>
+            <div class="field"><label>&nbsp;</label><div class="row"><button class="btn btn-sm" id="load-captcha" type="button">获取验证码</button><input id="p-captcha-id" type="hidden"></div></div>
+          </div>
+          <div id="captcha-box" class="mt-8"></div>
+          <div class="alert error" id="platform-error" hidden></div>
+          <div class="form-actions"><button class="btn btn-primary" type="submit">登录并验证</button></div>
+        </form>
+      `}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><div><h2>LLM API（可选）</h2><div class="card-sub">只给“LLM API”执行模式使用；本地 Codex 模式不读取这里的 API Key。</div></div>
         ${model.configured ? badge('已配置', 'completed') : badge('未配置', 'pending')}</div>
       <form id="model-form" class="stack">
         <div class="form-grid">
@@ -1575,6 +1605,60 @@ async function renderSettings() {
       </form>
     </div>`;
 
+  const platformForm = $('#platform-form');
+  if (platformForm) platformForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const box = $('#platform-error'); box.hidden = true;
+    const button = event.target.querySelector('button[type="submit"]');
+    button.disabled = true; button.textContent = '连接中…';
+    try {
+      await api('/api/platform/login', {
+        method: 'POST',
+        body: {
+          account: $('#p-account').value.trim(),
+          password: $('#p-password').value,
+          problem_url: $('#p-problem').value.trim(),
+          captcha_id: $('#p-captcha-id').value,
+          captcha_code: $('#p-captcha-code').value.trim(),
+        },
+        idem: false,
+      });
+      $('#p-password').value = '';
+      toast('CANNJudge 已连接并验证题目访问', 'success');
+      await renderConnections();
+    } catch (err) {
+      box.hidden = false; box.className = 'alert error'; box.textContent = err.message;
+      button.disabled = false; button.textContent = '登录并验证';
+    }
+  });
+  const captchaButton = $('#load-captcha');
+  if (captchaButton) captchaButton.addEventListener('click', async () => {
+    const box = $('#captcha-box');
+    box.innerHTML = '<span class="faint small">加载中…</span>';
+    try {
+      const data = await api('/api/platform/captcha');
+      $('#p-captcha-id').value = data.captcha_id;
+      box.innerHTML = `<img alt="验证码" style="max-width:220px;border-radius:8px;border:1px solid var(--border);background:#fff" src="${data.image_data_url}"><div class="faint small">由平台返回，仅本次登录使用。</div>`;
+    } catch (err) { box.innerHTML = `<div class="alert error small">${esc(err.message)}</div>`; }
+  });
+  const platformTest = $('#platform-test');
+  if (platformTest) platformTest.addEventListener('click', async () => {
+    const box = $('#evidence-box');
+    box.innerHTML = '<span class="faint small">检查中…</span>';
+    try {
+      const problemUrl = $('#p-problem')?.value.trim() || 'https://cannjudge.cn/hc_cann_codelabs/cann/add';
+      const data = await api('/api/platform/test', { method: 'POST', body: { problem_url: problemUrl }, idem: false });
+      box.innerHTML = `<pre class="small" style="max-height:280px;overflow:auto">${esc(jsonPretty(data.evidence))}</pre>`;
+    } catch (err) { box.innerHTML = `<div class="alert error small">${esc(err.message)}</div>`; }
+  });
+  const disconnect = $('#platform-disconnect');
+  if (disconnect) disconnect.addEventListener('click', async () => {
+    if (!confirm('清除服务器保存的 CANNJudge 会话？运行中的任务会暂停提交。')) return;
+    await api('/api/platform/disconnect', { method: 'POST', body: {} });
+    toast('已断开', 'success');
+    await renderConnections();
+  });
+
   $('#model-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const errorBox = $('#model-error');
@@ -1596,7 +1680,7 @@ async function renderSettings() {
         },
       });
       toast('模型配置已保存', 'success');
-      await renderSettings();
+      await renderConnections();
     } catch (err) {
       errorBox.hidden = false; errorBox.className = 'alert error'; errorBox.textContent = err.message;
     }
@@ -1615,7 +1699,7 @@ async function renderSettings() {
     if (!confirm('删除模型配置？')) return;
     await api('/api/settings/model', { method: 'DELETE' });
     toast('已删除', 'success');
-    renderSettings();
+    renderConnections();
   });
   $('#password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1624,179 +1708,6 @@ async function renderSettings() {
       toast('密码已更新', 'success');
       $('#pw-current').value = ''; $('#pw-new').value = '';
     } catch (err) { toast(err.message || '更新失败', 'error'); }
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* Platform                                                            */
-/* ------------------------------------------------------------------ */
-async function renderPlatform() {
-  setPoll(null);
-  const data = await api('/api/platform/status');
-  const platform = data.platform || {};
-  state.platform = platform;
-  const caps = platform.capabilities || {};
-  $('#view').innerHTML = `
-    <div class="row-between" style="margin-bottom:18px">
-      <div><h1>平台连接</h1><div class="muted">账号密码只在本次登录请求中经服务器转发，不保存密码；会话 Cookie 加密保存。</div></div>
-      ${platform.connected ? badge('已连接', 'completed') : badge('未连接', 'pending')}
-    </div>
-
-    ${platform.last_error ? `<div class="alert error" style="margin-bottom:16px">${esc(platform.last_error.message || JSON.stringify(platform.last_error))}</div>` : ''}
-
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="card-head"><h2>账号登录</h2><span class="faint small">${esc(platform.account_masked || '')}</span></div>
-        <form id="platform-form" class="stack">
-          <div class="field"><label for="p-account">CANNJudge 账号（邮箱或手机号）</label><input id="p-account" type="text" autocomplete="username" required></div>
-          <div class="field"><label for="p-password">密码</label><input id="p-password" type="password" autocomplete="current-password" required>
-            <div class="hint">密码不会写入数据库或日志；登录成功只保存会话 Cookie 与用户 ID。</div></div>
-          <div class="field"><label for="p-problem">用于验证 judge 访问的题目链接</label><input id="p-problem" type="url" value="https://cannjudge.cn/hc_cann_codelabs/cann/add">
-            <div class="hint">登录后会解析该题并读取模板；403/401 会明确返回“账号无法连接 judge”。</div></div>
-          <div class="field">
-            <label>图形验证码（仅平台要求时）</label>
-            <div class="row">
-              <input id="p-captcha-code" type="text" placeholder="验证码" style="max-width:160px">
-              <button class="btn btn-sm" id="load-captcha" type="button">获取验证码</button>
-            </div>
-            <input id="p-captcha-id" type="hidden">
-            <div id="captcha-box" class="mt-8"></div>
-          </div>
-          <div class="alert error" id="platform-error" hidden></div>
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit">登录并验证</button>
-          </div>
-        </form>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>连接状态</h2><span class="faint small">${esc(platform.base_url || '')}</span></div>
-        <div class="stack small">
-          <div class="row-between"><span class="muted">账号</span><span class="mono">${esc(platform.account_masked || '—')}</span></div>
-          <div class="row-between"><span class="muted">用户 ID</span><span class="mono">${esc(platform.user_id || '—')}</span></div>
-          <div class="row-between"><span class="muted">Judge 题目访问</span><span>${platform.judge_verified ? badge('已验证', 'completed') : badge('未验证', 'pending')}</span></div>
-          <div class="row-between"><span class="muted">实时线上验证</span><span>${badge('尚未用真实账号提交', 'pending')}</span></div>
-          <div class="row-between"><span class="muted">自定义测试数据</span><span>${badge('未核实，已禁用', 'pending')}</span></div>
-        </div>
-        <div class="toolbar" style="margin-top:14px">
-          <button class="btn" id="platform-test" type="button">测试当前连接</button>
-          ${platform.connected ? '<button class="btn btn-danger" id="platform-disconnect" type="button">断开并清除会话</button>' : ''}
-        </div>
-        <div id="evidence-box" class="mt-12"></div>
-        <div class="alert info small" style="margin-top:14px">
-          接口依据公开的 CANNJudge 接入资料实现，尚未在本部署完成真实提交验证。能力表中标注“documented”不等于线上验证通过。
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="card-head"><h2>能力矩阵</h2></div>
-      <div class="table-wrap"><table><thead><tr><th>能力</th><th>状态</th><th>说明</th></tr></thead><tbody>
-        ${Object.entries(caps).filter(([k]) => !['evidence', 'notes', 'platform', 'base_url'].includes(k)).map(([key, value]) => `<tr><td class="mono">${esc(key)}</td><td>${esc(typeof value === 'object' ? (value.status || JSON.stringify(value)) : String(value))}</td><td class="small muted">${esc(JSON.stringify(value).slice(0, 300))}</td></tr>`).join('')}
-      </tbody></table></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3>高级：导入浏览器会话</h3>
-      <p class="faint small">仅在你已掌握 CANNJudge 用户 ID 与 Cookie 时使用。Cookie 按凭据加密保存，不在页面回显。</p>
-      <form id="import-form" class="stack">
-        <div class="field"><label for="i-user">CANNJudge 用户 ID</label><input id="i-user" type="text" placeholder="登录响应中的 _id"></div>
-        <div class="field"><label for="i-cookies">Cookie 头</label><textarea id="i-cookies" placeholder="name=value; name2=value2"></textarea></div>
-        <div class="form-actions"><button class="btn" type="submit">导入会话</button></div>
-      </form>
-    </div>`;
-
-  $('#platform-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const box = $('#platform-error'); box.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true; button.textContent = '连接中…';
-    try {
-      await api('/api/platform/login', {
-        method: 'POST',
-        body: {
-          account: $('#p-account').value.trim(),
-          password: $('#p-password').value,
-          problem_url: $('#p-problem').value.trim(),
-          captcha_id: $('#p-captcha-id').value,
-          captcha_code: $('#p-captcha-code').value.trim(),
-        },
-        idem: false,
-      });
-      $('#p-password').value = '';
-      toast('CANNJudge 已连接并验证题目访问', 'success');
-      renderPlatform();
-    } catch (err) {
-      box.hidden = false; box.className = 'alert error'; box.textContent = err.message;
-      button.disabled = false; button.textContent = '登录并验证';
-    }
-  });
-  $('#load-captcha').addEventListener('click', async (event) => {
-    const box = $('#captcha-box');
-    box.innerHTML = '<span class="faint small">加载中…</span>';
-    try {
-      const data = await api('/api/platform/captcha');
-      $('#p-captcha-id').value = data.captcha_id;
-      box.innerHTML = `<img alt="验证码" style="max-width:220px;border-radius:8px;border:1px solid var(--border);background:#fff" src="${data.image_data_url}"><div class="faint small">由平台返回，仅本次登录使用。</div>`;
-    } catch (err) { box.innerHTML = `<div class="alert error small">${esc(err.message)}</div>`; }
-  });
-  $('#platform-test').addEventListener('click', async () => {
-    const box = $('#evidence-box');
-    box.innerHTML = '<span class="faint small">检查中…</span>';
-    try {
-      const data = await api('/api/platform/test', { method: 'POST', body: { problem_url: $('#p-problem').value.trim() }, idem: false });
-      box.innerHTML = `<pre class="small" style="max-height:280px;overflow:auto">${esc(jsonPretty(data.evidence))}</pre>`;
-    } catch (err) { box.innerHTML = `<div class="alert error small">${esc(err.message)}</div>`; }
-  });
-  const disconnect = $('#platform-disconnect');
-  if (disconnect) disconnect.addEventListener('click', async () => {
-    if (!confirm('清除服务器保存的 CANNJudge 会话？运行中的任务会暂停提交。')) return;
-    await api('/api/platform/disconnect', { method: 'POST', body: {} });
-    toast('已断开', 'success');
-    renderPlatform();
-  });
-  $('#import-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await api('/api/platform/import-session', {
-        method: 'POST',
-        body: { user_id: $('#i-user').value.trim(), cookies: $('#i-cookies').value.trim() },
-        idem: false,
-      });
-      toast('会话已导入', 'success');
-      renderPlatform();
-    } catch (err) { toast(err.message || '导入失败', 'error'); }
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* Backups                                                             */
-/* ------------------------------------------------------------------ */
-async function renderBackups() {
-  setPoll(null);
-  const data = await api('/api/backups');
-  const backups = data.backups || [];
-  $('#view').innerHTML = `
-    <div class="row-between" style="margin-bottom:18px">
-      <div><h1>服务器备份</h1><div class="muted">数据库 + 实验文件的服务器端备份；任务档案不等于灾备。</div></div>
-      <button class="btn btn-primary" id="create-backup" type="button">创建服务器备份</button>
-    </div>
-    <div class="alert warn" style="margin-bottom:16px">
-      默认不包含主密钥。没有 <span class="mono">secrets/master.key</span>，备份中的模型密钥和 CANNJudge 会话无法解密。包含密钥的备份等同于全部凭据明文，请离线保护。
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>备份列表</h2><span class="faint small">${esc(backups.length)} 个</span></div>
-      ${backups.length ? `<div class="table-wrap"><table><thead><tr><th>名称</th><th>创建时间</th><th>文件</th><th>大小</th><th>主密钥</th><th></th></tr></thead><tbody>
-        ${backups.map((b) => `<tr><td class="mono">${esc(b.name)}</td><td>${esc(fmtTime(b.created_at))}</td><td>${esc(b.files)}</td><td>${esc(fmtBytes(b.bytes))}</td><td>${b.master_key_included ? badge('包含', 'failed') : badge('不包含', 'completed')}</td><td><a class="btn btn-sm" href="/api/backups/${encodeURIComponent(b.name)}">下载 ZIP</a></td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">还没有备份。建议在首次真实提交前创建一次。</div>'}
-    </div>`;
-  $('#create-backup').addEventListener('click', async (event) => {
-    if (!confirm('创建服务器备份？包含数据库和实验文件，但不包含主密钥。')) return;
-    const button = event.target; button.disabled = true; button.textContent = '创建中…';
-    try {
-      const result = await api('/api/backups', { method: 'POST', body: {} });
-      toast(`备份完成：${result.backup.files} 个文件`, 'success');
-      renderBackups();
-    } catch (err) { toast(err.message || '备份失败', 'error'); button.disabled = false; button.textContent = '创建服务器备份'; }
   });
 }
 
