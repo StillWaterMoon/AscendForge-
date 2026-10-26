@@ -101,6 +101,16 @@ class WorkloadRecoveryTests(unittest.TestCase):
         spec = self.service.latest_spec(job["spec_key"])
         self.assertEqual(self.service.spec_public(spec)["testcases"][0]["evidence_status"], "inferred")
 
+    def test_large_tensor_artifact_is_rejected(self):
+        self._start()
+        _fp, job, hidden = self._job_and_hidden()
+        self._write_spec(hidden)
+        workspace = self.env.settings.data_dir / "cli_workspaces" / hidden["id"] / "workspace"
+        (workspace / "large.npy").write_bytes(b"x" * (1024 * 1024 + 1))
+        with self.assertRaises(RecoveryError) as ctx:
+            self.service.import_job(job["id"])
+        self.assertEqual(ctx.exception.code, "TENSOR_ARTIFACT_FORBIDDEN")
+
     def test_numel_mismatch_is_rejected(self):
         self._start()
         _fp, job, hidden = self._job_and_hidden()

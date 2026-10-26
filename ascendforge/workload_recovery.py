@@ -272,7 +272,7 @@ class WorkloadRecoveryService:
             "task_id": row["task_id"],
             "workspace_task_id": row["workspace_task_id"],
             "status": row["status"],
-            "phase": row.get("phase"),
+            "phase": config.get("codex_resume_phase") or row.get("phase"),
             "progress": json_loads(row.get("progress_json"), {}),
             "error_code": row.get("error_code"),
             "error_message": row.get("error_message"),
@@ -621,8 +621,15 @@ class WorkloadRecoveryService:
         if not expected_set:
             warnings.append("题目未提供 testcase ID 集合，无法声明完整覆盖")
         all_have_inputs = all(case["inputs"] for case in cases)
+        all_specified = all(
+            tensor.get("dtype") is not None
+            and tensor.get("shape") is not None
+            and tensor.get("numel") is not None
+            for case in cases
+            for tensor in case["inputs"] + case["outputs"]
+        )
         claimed = str(raw.get("status") or "").strip().lower()
-        if measured and len(measured) == len(cases) and covered and all_have_inputs:
+        if measured and len(measured) == len(cases) and covered and all_have_inputs and all_specified:
             status = "verified"
         elif measured or any(case["inputs"] for case in cases):
             status = "partial"
