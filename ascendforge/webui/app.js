@@ -12,7 +12,7 @@ const state = {
   workerTimer: null,
   route: '',
   taskId: null,
-  taskTab: 'overview',
+  taskTab: 'attempts',
   lockedToastTask: null,
   summary: null,
   platform: null,
@@ -651,22 +651,15 @@ document.addEventListener('click', (event) => {
 /* ------------------------------------------------------------------ */
 async function renderTask(taskId) {
   setPoll(() => renderTask(taskId).catch(() => {}), 3000);
-  const [data, eventData] = await Promise.all([
-    api(`/api/tasks/${encodeURIComponent(taskId)}`),
-    api(`/api/tasks/${encodeURIComponent(taskId)}/events?limit=150`),
-  ]);
+  const data = await api(`/api/tasks/${encodeURIComponent(taskId)}`);
   const task = data.task;
   state.task = task;
+  if (!['attempts', 'submissions'].includes(state.taskTab)) state.taskTab = 'attempts';
   if (task.last_error_code === 'CODEX_THREAD_LOCKED' && state.lockedToastTask !== task.id) {
     state.lockedToastTask = task.id;
     toast('原会话正被另一个 Codex 进程占用；请关闭占用端会话后重试。原会话与工作区已保留。', 'error');
   }
   const quota = task.quota || {};
-  const config = task.config || {};
-  const usage = task.usage || {};
-  const best = task.best_metric || task.best_metric_json;
-  const isTerminal = ['completed', 'failed', 'stopped'].includes(task.status);
-  const events = (eventData.events || []).slice(-120);
   const scroll = window.scrollY;
 
   $('#view').innerHTML = `
@@ -693,65 +686,12 @@ async function renderTask(taskId) {
 
     ${renderTaskAlert(task, quota)}
 
-    <div class="strategy-strip">
-      <div class="strategy-strip-main">
-        <span class="strategy-strip-label">当前策略 · ${esc(phaseLabel(task.active_strategy?.phase))}</span>
-        <span class="strategy-strip-text" title="${esc(task.active_strategy?.text || '')}">${esc(task.active_strategy?.text || '等待第一条远端结果')}</span>
-        <span class="strategy-owner">长期约束：${config.strategy_prompt ? esc(String(config.strategy_prompt).slice(0, 120)) : '未设置'}</span>
-      </div>
-    </div>
-
-    ${task.config?.codex_runner_active ? `<div class="experiment-strip codex-run-strip">
-      <span class="experiment-title">${config.codex_pause_phase === 'requested' ? 'Codex 暂停中' : task.status === 'paused' ? 'Codex 已暂停' : 'Codex 运行中'}</span>
-      <span>PID <b class="mono">${esc(task.config.codex_runner_pid || '—')}</b></span>
-      <span>${esc(codexPhaseLabel(config.codex_resume_phase))}</span>
-      <span>${esc(task.config.codex_runner_status || 'running')}</span>
-      ${task.config.codex_session_ref ? `<span>thread <b class="mono">${esc(task.config.codex_session_ref)}</b></span>` : ''}
-      ${task.config.codex_runner_log ? `<span class="mono">${esc(String(task.config.codex_runner_log).split(/[\\/]/).pop())}</span>` : ''}
-    </div>` : ''}
-    ${!task.config?.codex_runner_active && task.config?.codex_session_ref ? `<div class="experiment-strip codex-run-strip">
-      <span class="experiment-title">Codex 会话</span>
-      <span class="mono">${esc(task.config.codex_session_ref)}</span>
-      <span class="faint">可在 Codex 客户端打开同一 thread</span>
-    </div>` : ''}
-
-    ${task.experiment?.id ? `<div class="experiment-strip">
-      <span class="experiment-title">实验 #${esc(task.experiment.ordinal)} <span class="faint">${esc(task.experiment.status)}</span></span>
-      <span>baseline <b class="mono">${esc(String(task.experiment.baseline_attempt_id || '—').slice(0, 12))}</b></span>
-      <span>working <b class="mono">${esc(String(task.experiment.working_attempt_id || '—').slice(0, 12))}</b></span>
-      <span>experiment best <b class="mono">${esc(String(task.experiment.experiment_best_id || '—').slice(0, 12))}</b></span>
-      ${task.experiment.hypothesis ? `<span class="experiment-hypothesis" title="${esc(task.experiment.hypothesis)}">${esc(String(task.experiment.hypothesis).slice(0, 120))}</span>` : ''}
-    </div>` : ''}
-
-    <div class="grid grid-4" style="margin-bottom:16px">
-      <div class="metric"><div class="metric-label">正确性基线</div><div class="metric-value small">${renderBestValue(best)}</div><div class="metric-note">${esc(task.best_attempt_id ? '保留的通过参考实现' : '暂无')}</div></div>
-      <div class="metric"><div class="metric-label">性能最好</div><div class="metric-value small">${renderPerformanceBest(task)}</div><div class="metric-note">${esc(task.performance_best ? `${task.performance_best.metric} · ${task.performance_best.samples || 0} 个测试点` : '性能未知')}</div></div>
-      <div class="metric"><div class="metric-label">候选 / 已提交</div><div class="metric-value">${esc(task.counts?.candidates ?? 0)} <span class="faint" style="font-size:14px">/ ${esc(quota.sends_total ?? 0)}</span></div><div class="metric-note">提交上限 ${esc(limitLabel(config.max_submissions_per_task))}</div></div>
-      <div class="metric"><div class="metric-label">下一次提交</div><div class="metric-value small">${esc(quota.next_submit_at ? fmtTime(quota.next_submit_at) : '等待 CLI')}</div><div class="metric-note">间隔 ${esc(config.min_submit_interval_sec ?? '—')}s · 在途 ${esc(quota.inflight ?? 0)}</div></div>
-    </div>
-
-    <div class="grid grid-2" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-head"><h3>调度与设备</h3></div>
-        <div class="stack small">
-          <div class="row-between"><span class="muted">今日提交（${esc(quota.day || '')}）</span><span class="mono">${esc(quota.sends_today ?? 0)} / ${esc(limitLabel(quota.max_submissions_per_day))}</span></div>
-          <div class="row-between"><span class="muted">账号在途</span><span class="mono">${esc(quota.inflight ?? 0)} / ${esc(quota.max_inflight ?? '—')}</span></div>
-          <div class="row-between"><span class="muted">未知提交</span><span class="mono" style="color:${quota.unknown ? 'var(--accent)' : 'inherit'}">${esc(quota.unknown ?? 0)}</span></div>
-          <div class="row-between"><span class="muted">执行器 / NPU</span><span class="mono">${esc(task.capabilities?.executor?.selected || '—')} / ${task.capabilities?.npu?.available ? '可用' : '不可用'}</span></div>
-          <div class="row-between"><span class="muted">候选本地执行</span><span class="mono">${esc(task.capabilities?.candidate_execution?.status || '—')}</span></div>
-          <div class="row-between"><span class="muted">Worker</span><span>${task.worker?.alive ? badge('在线', 'completed') : badge('离线', 'failed')}</span></div>
-        </div>
-      </div>
-    </div>
-
     <div class="card">
       <div class="tabs" id="task-tabs">
-        ${taskTabButton('overview', '概览')}
         ${taskTabButton('attempts', '尝试记录')}
         ${taskTabButton('submissions', '提交与反馈')}
-        ${taskTabButton('config', '配置')}
       </div>
-      <div id="task-tab-body">${renderTaskTab(task, events, config, usage)}</div>
+      <div id="task-tab-body">${renderTaskTab(task)}</div>
     </div>`;
 
   $$('[data-task-action]').forEach((button) => {
@@ -1076,62 +1016,84 @@ function renderBestValue(best) {
   return esc(best.raw_status || '通过');
 }
 
-function renderTaskTab(task, events, config, usage) {
-  if (state.taskTab === 'attempts') {
-    if (!(task.attempts || []).length) return '<div class="empty">还没有尝试。启动任务后 Agent 会创建第一份快照。</div>';
-    return `<div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>假设</th><th>父版本</th><th></th></tr></thead>
-      <tbody>${task.attempts.map((a) => {
-        const n = a.normalized_json || {};
-        return `<tr class="clickable record-row" data-attempt-open="${esc(a.id)}" title="点击查看详情">
-          <td class="mono">${esc(a.ordinal)}</td>
-          <td>${attemptBadge(a.status)}</td>
-          <td>${a.normalized_json ? outcomeBadge(n.outcome) : '<span class="faint">—</span>'}</td>
-          <td class="mono">${n.testcase_total ? `${esc(n.testcase_passed)}/${esc(n.testcase_total)}` : '—'}</td>
-          <td class="mono">${n.score !== undefined && n.score !== null ? 'score=' + esc(n.score) : n.precision_ratio !== undefined && n.precision_ratio !== null ? 'prec=' + esc(n.precision_ratio) : '—'}</td>
-          <td class="record-cell" title="${esc(a.hypothesis || '')}">${esc(a.hypothesis || '')}</td>
-          <td class="mono faint">${esc(a.parent_attempt_id || '—')}</td>
-          <td class="faint">›</td>
-        </tr>`;
-      }).join('')}</tbody></table></div>`;
+function testcaseScoreSum(normalized) {
+  const testcases = Array.isArray(normalized?.testcases) ? normalized.testcases : [];
+  let total = 0;
+  let found = false;
+  for (const testcase of testcases) {
+    const raw = testcase?.raw || {};
+    const value = raw.score ?? testcase?.score;
+    if (value !== null && value !== undefined && Number.isFinite(Number(value))) {
+      total += Number(value);
+      found = true;
+    }
   }
+  if (found) return total;
+  if (normalized?.score !== null && normalized?.score !== undefined && Number.isFinite(Number(normalized.score))) {
+    return Number(normalized.score);
+  }
+  return null;
+}
+
+function ojResult(normalized) {
+  const raw = String(normalized?.raw_status || '').trim();
+  if (!raw) return { label: '—', cls: 'unknown' };
+  const label = raw === 'Wrong Answer' ? 'WA' : raw;
+  const cls = /pass/i.test(raw) ? 'pass' : /(wrong|compile|runtime|error|fail)/i.test(raw) ? 'fail' : 'unknown';
+  return { label, cls };
+}
+
+function recordCells(attempt, normalized) {
+  const result = ojResult(normalized);
+  const cases = normalized?.testcase_total
+    ? `${normalized.testcase_passed ?? 0}/${normalized.testcase_total}`
+    : '—';
+  const score = testcaseScoreSum(normalized);
+  return {
+    result: result.label === '—' ? '<span class="faint">—</span>' : badge(result.label, result.cls),
+    cases: esc(cases),
+    score: score === null ? '—' : esc(score),
+    thought: esc(attempt.hypothesis || ''),
+  };
+}
+
+function renderTaskTab(task) {
   if (state.taskTab === 'submissions') {
     const submissions = task.submissions || [];
     if (!submissions.length) return '<div class="empty">还没有远端提交。</div>';
     return `<div class="table-wrap"><table>
-      <thead><tr><th>提交</th><th>状态</th><th>远端 ID</th><th>发送时间</th><th>结果</th><th>错误</th><th></th></tr></thead>
-      <tbody>${submissions.map((s) => {
-        const attempt = (task.attempts || []).find((a) => a.id === s.attempt_id) || {};
-        const n = attempt.normalized_json || {};
+      <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>思路</th></tr></thead>
+      <tbody>${submissions.map((submission) => {
+        const attempt = (task.attempts || []).find((item) => item.id === submission.attempt_id) || {};
+        const cells = recordCells(attempt, attempt.normalized_json || {});
         const open = attempt.id ? ` data-attempt-open="${esc(attempt.id)}"` : '';
+        const resolving = ['unknown', 'submitting'].includes(submission.state);
         return `<tr class="clickable record-row"${open} title="点击查看详情">
-          <td class="mono small">${esc(s.id)}</td>
-          <td>${badge(SUBMISSION_STATUS[s.state] || s.state, s.state === 'finished' ? 'completed' : s.state === 'unknown' ? 'unknown' : s.state === 'failed' ? 'failed' : 'running')}</td>
-          <td class="mono small">${esc(s.remote_id || '—')}</td>
-          <td class="small">${esc(fmtTime(s.sent_at))}</td>
-          <td>${n.outcome ? outcomeBadge(n.outcome) : '<span class="faint">—</span>'}</td>
-          <td class="record-cell" title="${esc(s.error_message || '')}">${esc(s.error_message || '')}</td>
-          <td>${['unknown', 'submitting'].includes(s.state) ? `<button class="btn btn-sm btn-primary" type="button" data-resolve="${esc(s.id)}">对账/确认</button>` : '<span class="faint">›</span>'}</td>
+          <td class="mono">${esc(attempt.ordinal ?? '—')}</td>
+          <td>${badge(SUBMISSION_STATUS[submission.state] || submission.state, submission.state === 'finished' ? 'completed' : submission.state === 'failed' ? 'failed' : submission.state === 'unknown' ? 'unknown' : 'running')}
+            ${resolving ? `<button class="btn btn-sm btn-primary" type="button" data-resolve="${esc(submission.id)}">对账</button>` : ''}</td>
+          <td>${cells.result}</td>
+          <td class="mono">${cells.cases}</td>
+          <td class="mono">${cells.score}</td>
+          <td class="record-cell" title="${cells.thought}">${cells.thought}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }
-  if (state.taskTab === 'config') {
-    return `<pre class="card config-json">${esc(jsonPretty({ config, problem_id: task.problem_id, problem_url: task.problem_url, best_metric: task.best_metric, local_best: task.local_best, usage }))}</pre>`;
-  }
-  return `<div class="grid grid-2">
-    <div>
-      <h3>题目合同</h3>
-      <pre class="small" style="max-height:260px;overflow:auto">${esc(jsonPretty(task.problem || {}))}</pre>
-      <h3 style="margin-top:16px">模板文件</h3>
-      <div class="table-wrap"><table><thead><tr><th>路径</th><th>可编辑</th><th>大小</th></tr></thead><tbody>
-        ${(task.template?.files || []).map((f) => `<tr><td class="mono">${esc(f.path)}</td><td>${f.editable ? '是' : '只读'}</td><td>${esc(fmtBytes(f.bytes))}</td></tr>`).join('') || '<tr><td colspan="3" class="faint">无模板文件</td></tr>'}
-      </tbody></table></div>
-    </div>
-    <div>
-      <h3>事件</h3>
-      <div class="log">${events.length ? events.map(renderEvent).join('') : '<div class="empty">暂无事件</div>'}</div>
-    </div>
-  </div>`;
+  if (!(task.attempts || []).length) return '<div class="empty">还没有尝试。</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>状态</th><th>结果</th><th>用例</th><th>指标</th><th>思路</th></tr></thead>
+    <tbody>${task.attempts.map((attempt) => {
+      const normalized = attempt.normalized_json || {};
+      const cells = recordCells(attempt, normalized);
+      return `<tr class="clickable record-row" data-attempt-open="${esc(attempt.id)}" title="点击查看详情">
+        <td class="mono">${esc(attempt.ordinal)}</td>
+        <td>${attemptBadge(attempt.status)}</td>
+        <td>${cells.result}</td>
+        <td class="mono">${cells.cases}</td>
+        <td class="mono">${cells.score}</td>
+        <td class="record-cell" title="${cells.thought}">${cells.thought}</td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
 }
 
 function renderEvent(event) {
