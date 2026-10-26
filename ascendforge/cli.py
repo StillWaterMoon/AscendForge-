@@ -253,7 +253,6 @@ def cmd_status(args) -> int:
             "database": str(settings.db_path),
             "tasks": counts,
             "worker": heartbeat,
-            "model_configured": bool(db.scalar("SELECT 1 FROM credentials WHERE kind='model'")),
             "cannjudge_connected": bool(db.scalar("SELECT 1 FROM credentials WHERE kind='cannjudge'")),
             "capabilities": {
                 "npu": caps.get("npu"),

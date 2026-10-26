@@ -33,19 +33,6 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .agent.prompts import system_prompt
-from .agent.protocol import TOOLS
-from .agent.runtime import SKILLS_FOR_OPTIMIZATION
-from .agent.strategy import derive_active_strategy
-from .experiment_service import (
-    active_experiment,
-    current_context,
-    start_experiment,
-    update_plan,
-)
-from .agent.providers import ModelConfig, ProviderError, make_provider
-from .agent.skills import SkillError, SkillRegistry
-from .baseline import create_baseline_submission
 from .config import Settings
 from .db import Database
 from .execution.capabilities import detect_capabilities
@@ -73,8 +60,6 @@ from .security import (
     hash_password,
     load_master_key,
     lookup_session,
-    mask_key,
-    model_settings_public,
     purge_expired_sessions,
     revoke_session,
     setup_token_valid,
@@ -128,7 +113,6 @@ class App:
         self.platform = PlatformService(self.db, settings, self.credentials)
         self.tasks = TaskService(self.db, settings, self.platform)
         self.scheduler = Scheduler(self.db, settings, self.platform, self.tasks)
-        self.skills = SkillRegistry(settings.root / "skills")
         self.throttle = LoginThrottle()
         self.idem_lock = threading.Lock()
         self.setup_token = settings.setup_token
@@ -183,17 +167,9 @@ class App:
     def capabilities(self) -> dict:
         return detect_capabilities(self.settings)
 
-    def model_public(self) -> dict:
-        payload = self.credentials.get("model")
-        data = model_settings_public(payload)
-        if payload:
-            data["endpoint"] = ModelConfig.from_payload(payload).endpoint()
-        return data
-
     def summary(self) -> dict:
         counts = self.tasks.status_counts()
         recent = self.tasks.list()[:8]
-        model = self.model_public()
         platform = self.platform_public()
         capabilities = detect_capabilities(self.settings)
         return {
@@ -203,7 +179,6 @@ class App:
             "counts": counts,
             "tasks": recent,
             "worker": self.worker_state(),
-            "model": {"configured": bool(model.get("configured")), "model": model.get("model")},
             "platform": {
                 "connected": platform.get("connected"),
                 "judge_verified": platform.get("judge_verified"),
@@ -215,7 +190,6 @@ class App:
                 "executor": capabilities.get("executor", {}).get("selected"),
                 "remote_custom_tests": capabilities.get("remote_custom_tests", {}).get("supported"),
             },
-            "skills": self.skills.list(),
             "next_submit_hint": "见任务详情中的调度额度",
         }
 
@@ -236,25 +210,13 @@ class App:
             ("POST", r"^/api/project-templates$", "h_project_template_upload", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)$", "h_task_detail", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/(?P<action>start|pause|resume|stop)$", "h_task_control", False, False),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/baseline-submit$", "h_baseline_submit", False, False),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/continue-optimization$", "h_continue_optimization", False, False),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/strategy$", "h_update_strategy", False, False),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/budget$", "h_update_budget", False, False),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/experiment$", "h_update_experiment", False, False),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/codex-run$", "h_codex_run", False, False),
-            ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/events$", "h_task_events", False, True),
-            ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages", False, True),
-            ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/messages$", "h_task_messages_post", False, False),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts$", "h_task_attempts", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)$", "h_attempt_detail", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/attempts/(?P<attempt_id>[A-Za-z0-9_-]+)/download$", "h_attempt_download", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/download/best$", "h_best_download", False, True),
             ("GET", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/archive$", "h_task_archive", False, True),
             ("POST", r"^/api/tasks/(?P<task_id>[A-Za-z0-9_-]+)/submissions/(?P<submission_id>[A-Za-z0-9_-]+)/resolve$", "h_resolve_submission", False, False),
-            ("GET", r"^/api/settings/model$", "h_model_get", False, True),
-            ("PUT", r"^/api/settings/model$", "h_model_put", False, False),
-            ("DELETE", r"^/api/settings/model$", "h_model_delete", False, False),
-            ("POST", r"^/api/settings/model/test$", "h_model_test", False, False),
             ("GET", r"^/api/platform/status$", "h_platform_status", False, True),
             ("GET", r"^/api/platform/captcha$", "h_platform_captcha", False, True),
             ("POST", r"^/api/platform/login$", "h_platform_login", False, False),
@@ -262,7 +224,6 @@ class App:
             ("POST", r"^/api/platform/test$", "h_platform_test", False, False),
             ("POST", r"^/api/platform/disconnect$", "h_platform_disconnect", False, False),
             ("GET", r"^/api/capabilities$", "h_capabilities", False, True),
-            ("GET", r"^/api/skills$", "h_skills", False, True),
             ("GET", r"^/api/worker$", "h_worker", False, True),
         ]
         return [Route(method, re.compile(pattern), handler, public, csrf) for method, pattern, handler, public, csrf in raw]
@@ -517,8 +478,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self._task_error_status(exc.code), {"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
         except PlatformError as exc:
             self._send_json(self._platform_error_status(exc.code), {"error": exc.public()})
-        except ProviderError as exc:
-            self._send_json(self._provider_error_status(exc.code), {"error": exc.public()})
         except SnapshotError as exc:
             self._send_json(500, {"error": {"code": "SNAPSHOT_ERROR", "message": str(exc)}})
         except (ValueError, KeyError) as exc:
@@ -571,16 +530,6 @@ class Handler(BaseHTTPRequestHandler):
         if code == "RATE_LIMITED":
             return 429
         if code in ("NETWORK_ERROR", "PLATFORM_UNAVAILABLE"):
-            return 502
-        return 400
-
-    @staticmethod
-    def _provider_error_status(code: str) -> int:
-        if code in ("MODEL_AUTH", "MODEL_FORBIDDEN", "MODEL_NOT_CONFIGURED"):
-            return 401
-        if code == "MODEL_RATE_LIMITED":
-            return 429
-        if code in ("MODEL_NETWORK", "MODEL_UNAVAILABLE"):
             return 502
         return 400
 
@@ -769,12 +718,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_tasks_create(self, session: dict | None = None, **_):
         body = self._read_json()
-        execution_mode = str(body.get("execution_mode") or "api").strip().lower()
-        if execution_mode not in ("api", "codex"):
-            raise ApiError(400, "BAD_EXECUTION_MODE", "execution_mode 必须是 api 或 codex")
+        execution_mode = str(body.get("execution_mode") or "codex").strip().lower()
+        if execution_mode != "codex":
+            raise ApiError(400, "API_MODE_REMOVED", "LLM API 执行模式已移除；任务必须使用本地 CLI")
         upload_id = str(body.get("project_upload_id") or "").strip()
-        if upload_id and execution_mode != "codex":
-            raise ApiError(400, "MODE_FIELD_MISMATCH", "只有本地 Codex 模式可以上传项目模板")
         project_archive = None
         if upload_id:
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", upload_id):
@@ -825,12 +772,9 @@ class Handler(BaseHTTPRequestHandler):
         detail = self.app.tasks.detail(task_id)
         detail["quota"] = self.app.scheduler.quota_snapshot(task_id)
         detail["budget"] = self.app.scheduler.budget_report(self.app.tasks.get(task_id))
-        detail["active_strategy"] = derive_active_strategy(detail, detail.get("attempts") or [])
-        detail["experiment"] = current_context(self.app.db, task_id)
         detail["platform"] = self.app.platform_public()
         detail["capabilities"] = self.app.capabilities()
         detail["worker"] = self.app.worker_state()
-        detail["model_configured"] = self.app.credentials.has("model")
         # The UI does not need full template contents; keep a compact summary.
         template = detail.get("template") or {}
         files = template.get("files") if isinstance(template, dict) else []
@@ -881,239 +825,6 @@ class Handler(BaseHTTPRequestHandler):
             actor=(session or {}).get("username", "user"),
         )
         return 200, result
-
-    def h_baseline_submit(self, task_id: str, session: dict | None = None, **_):
-        body = self._read_json()
-        if body.get("confirm") is not True:
-            raise ApiError(400, "CONFIRM_REQUIRED", "真实提交前必须显式确认 confirm=true")
-        result = create_baseline_submission(
-            self.app.db,
-            self.app.settings,
-            self.app.tasks,
-            self.app.scheduler,
-            task_id,
-            actor=(session or {}).get("username", "user"),
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (
-                (session or {}).get("username"),
-                "baseline_submit",
-                task_id,
-                json_dumps({"submission_id": result["submission"]["id"], "snapshot_id": result["snapshot"]["id"]}),
-                now(),
-            ),
-        )
-        return self.h_task_detail(task_id)
-
-    def h_continue_optimization(self, task_id: str, session: dict | None = None, **_):
-        task = self.app.tasks.get(task_id)
-        if task["status"] not in ("completed", "stopped"):
-            raise ApiError(409, "BAD_STATE", "只有已停止或已结束的任务可以继续优化")
-        if (task.get("config") or {}).get("execution_mode") == "codex":
-            raise ApiError(400, "USE_CODEX_RUN", "Codex 任务请点击“Codex 运行”恢复原会话")
-        if not self.app.credentials.has("model"):
-            raise ApiError(409, "MODEL_NOT_CONFIGURED", "请先在“模型与设置”中配置模型 API")
-        previous_status = task["status"]
-        previous_reason = task.get("stop_reason")
-        candidates = int(
-            self.app.db.scalar(
-                "SELECT COUNT(*) FROM attempts WHERE task_id=? AND snapshot_id IS NOT NULL", (task_id,)
-            )
-            or 0
-        )
-        submissions = int(
-            self.app.db.scalar("SELECT COUNT(*) FROM submissions WHERE task_id=? AND sent_at IS NOT NULL", (task_id,))
-            or 0
-        )
-        config = dict(task.get("config") or {})
-        old_attempt_limit = int(config.get("max_attempts") or 20)
-        old_submit_limit = config.get("max_submissions_per_task")
-        if old_submit_limit in (None, 0):
-            new_submit_limit = 0  # unlimited stays unlimited
-        else:
-            new_submit_limit = int(old_submit_limit)
-            if new_submit_limit <= submissions:
-                new_submit_limit = submissions + 10
-        config.update(
-            {
-                "manual_only": False,
-                # Preserve a user-adjusted budget. Only add headroom when the
-                # old limit is already exhausted, otherwise every continuation
-                # would silently override an explicit lower limit.
-                "max_attempts": old_attempt_limit if old_attempt_limit > candidates else candidates + 10,
-                "max_submissions_per_task": new_submit_limit,
-                "max_stall_rounds": max(10, int(config.get("max_stall_rounds") or 10)),
-            }
-        )
-        self.app.db.execute(
-            "UPDATE tasks SET status='running', stop_reason=NULL, stopped_at=NULL, paused_at=NULL, "
-            "last_error_code=NULL, last_error=NULL, started_at=?, next_action_at=?, config_json=?, updated_at=? WHERE id=?",
-            (now(), now(), json_dumps(config), now(), task_id),
-        )
-        add_event(
-            self.app.db,
-            task_id,
-            None,
-            "continue_optimization",
-            {
-                "actor": (session or {}).get("username", "user"),
-                "previous_status": previous_status,
-                "previous_reason": previous_reason,
-            },
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (
-                (session or {}).get("username"),
-                "continue_optimization",
-                task_id,
-                json_dumps({"previous_status": previous_status, "previous_reason": previous_reason}),
-                now(),
-            ),
-        )
-        return self.h_task_detail(task_id)
-
-    def h_update_strategy(self, task_id: str, session: dict | None = None, **_):
-        task = self.app.tasks.get(task_id)
-        body = self._read_json()
-        strategy = body.get("strategy_prompt", "")
-        if not isinstance(strategy, str):
-            raise ApiError(400, "BAD_STRATEGY", "strategy_prompt 必须是字符串")
-        config = normalize_config({"strategy_prompt": strategy}, base=task.get("config") or {})
-        self.app.db.execute(
-            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-            (json_dumps(config), now(), task_id),
-        )
-        add_event(
-            self.app.db,
-            task_id,
-            None,
-            "strategy_updated",
-            {"actor": (session or {}).get("username", "user"), "chars": len(strategy)},
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            ((session or {}).get("username"), "update_strategy", task_id, json_dumps({"chars": len(strategy)}), now()),
-        )
-        return self.h_task_detail(task_id)
-
-    def h_update_budget(self, task_id: str, session: dict | None = None, **_):
-        task = self.app.tasks.get(task_id)
-        body = self._read_json()
-        allowed = {
-            "max_submissions_per_task",
-            "max_submissions_per_day",
-            "max_attempts",
-            "max_stall_rounds",
-            "max_runtime_sec",
-            "max_model_calls",
-            "max_tokens",
-            "min_submit_interval_sec",
-            "max_inflight",
-            "poll_interval_sec",
-        }
-        patch = {}
-        for key in allowed:
-            if key not in body:
-                continue
-            try:
-                patch[key] = int(body[key])
-            except (TypeError, ValueError):
-                raise ApiError(400, "BAD_BUDGET", f"{key} 必须是整数") from None
-        if not patch:
-            raise ApiError(400, "BAD_BUDGET", "至少提供一个预算字段")
-        old = dict(task.get("config") or {})
-        config = normalize_config(patch, base=old)
-        self.app.db.execute(
-            "UPDATE tasks SET config_json=?, updated_at=? WHERE id=?",
-            (json_dumps(config), now(), task_id),
-        )
-        add_event(
-            self.app.db,
-            task_id,
-            None,
-            "budget_updated",
-            {
-                "actor": (session or {}).get("username", "user"),
-                "old": {key: old.get(key) for key in patch},
-                "new": patch,
-            },
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (
-                (session or {}).get("username"),
-                "update_budget",
-                task_id,
-                json_dumps({"old": {key: old.get(key) for key in patch}, "new": patch}),
-                now(),
-            ),
-        )
-        return self.h_task_detail(task_id)
-
-    def h_update_experiment(self, task_id: str, session: dict | None = None, **_):
-        task = self.app.tasks.get(task_id)
-        body = self._read_json()
-        hypothesis = str(body.get("hypothesis") or "").strip()
-        if not hypothesis:
-            raise ApiError(400, "BAD_EXPERIMENT", "hypothesis 不能为空")
-        try:
-            search_space = body.get("search_space")
-            if isinstance(search_space, str):
-                search_space = json.loads(search_space)
-            success_criteria = body.get("success_criteria")
-            if isinstance(success_criteria, str):
-                success_criteria = json.loads(success_criteria)
-            budget = body.get("budget")
-            if isinstance(budget, str):
-                budget = json.loads(budget)
-        except json.JSONDecodeError:
-            raise ApiError(400, "BAD_EXPERIMENT_JSON", "search_space/success_criteria/budget 必须是合法 JSON") from None
-        if body.get("new_experiment"):
-            experiment = start_experiment(
-                self.app.db,
-                task_id,
-                hypothesis=hypothesis,
-                baseline_attempt_id=str(body.get("baseline_attempt_id") or "").strip() or None,
-                search_space=search_space,
-                success_criteria=success_criteria,
-                budget=budget,
-                actor=(session or {}).get("username", "user"),
-            )
-        else:
-            active = active_experiment(self.app.db, task_id)
-            if not active:
-                experiment = start_experiment(
-                    self.app.db,
-                    task_id,
-                    hypothesis=hypothesis,
-                    baseline_attempt_id=str(body.get("baseline_attempt_id") or "").strip() or None,
-                    search_space=search_space,
-                    success_criteria=success_criteria,
-                    budget=budget,
-                    actor=(session or {}).get("username", "user"),
-                )
-            else:
-                experiment = update_plan(
-                    self.app.db,
-                    active["id"],
-                    hypothesis=hypothesis,
-                    search_space=search_space,
-                    success_criteria=success_criteria,
-                    budget=budget,
-                )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (
-                (session or {}).get("username"),
-                "update_experiment",
-                task_id,
-                json_dumps({"experiment_id": experiment["id"], "hypothesis": hypothesis[:500]}),
-                now(),
-            ),
-        )
-        return self.h_task_detail(task_id)
 
     def _launch_codex_runner(self, task_id: str, prompt: str, session: dict | None) -> dict:
         """启动一个 Codex app-server 会话（Web 按钮和创建任务共用）。"""
@@ -1287,34 +998,6 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "BAD_PROMPT", "prompt 不能超过 8000 字符")
         return 200, self._launch_codex_runner(task_id, prompt, session)
 
-    def h_task_messages(self, task_id: str, **_: Any):
-        task = self.app.tasks.get(task_id)
-        return 200, {"messages": task.get("messages") or []}
-
-    def h_task_messages_post(self, task_id: str, session: dict | None = None, **_):
-        body = self._read_json()
-        message = self.app.tasks.add_message(
-            task_id,
-            str(body.get("content") or ""),
-            author=(session or {}).get("username", "admin"),
-        )
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            (
-                (session or {}).get("username"),
-                "operator_message",
-                task_id,
-                json_dumps({"message_id": message["id"], "chars": len(message["content"])}),
-                now(),
-            ),
-        )
-        return self.h_task_detail(task_id)
-
-    def h_task_events(self, task_id: str, **_: Any):
-        after = int((self.query.get("after") or ["0"])[0])
-        limit = int((self.query.get("limit") or ["200"])[0])
-        return 200, {"events": self.app.tasks.events(task_id, after=after, limit=limit)}
-
     def h_task_attempts(self, task_id: str, **_: Any):
         attempts = attempt_history(self.app.db, task_id, limit=100)
         for attempt in attempts:
@@ -1366,12 +1049,6 @@ class Handler(BaseHTTPRequestHandler):
         )
         if submission and submission.get("response_json"):
             submission["response_json"] = json_loads(submission["response_json"], submission["response_json"])
-        system_text = ""
-        try:
-            skill_block, _ = self.app.skills.prompt_block(SKILLS_FOR_OPTIMIZATION)
-            system_text = system_prompt(skill_block)
-        except Exception:
-            system_text = "(current system prompt could not be reconstructed)"
         return 200, {
             "attempt": attempt,
             "snapshot": snapshot,
@@ -1379,51 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
             "parent_diff": parent_diff,
             "best_diff": best_diff,
             "submission": submission,
-            "system_prompt": system_text,
-            "tools": list(TOOLS.values()),
-            "messages": self._agent_messages(attempt_id),
-            "prompt_note": (
-                "Each model call sends the system prompt plus the transcript prefix at that time, "
-                "plus the tool schemas. This view shows the stored attempt transcript."
-            ),
         }
-
-    def _agent_messages(self, attempt_id: str) -> list[dict]:
-        rows = self.app.db.query(
-            "SELECT seq, role, content, created_at FROM agent_messages WHERE attempt_id=? ORDER BY seq",
-            (attempt_id,),
-        )
-        result = []
-        for row in rows:
-            content = row["content"]
-            decoded = None
-            if content.startswith("{"):
-                try:
-                    decoded = json.loads(content)
-                except ValueError:
-                    decoded = None
-            if row["role"] == "assistant" and isinstance(decoded, dict) and "_native_tool_calls" in decoded:
-                result.append(
-                    {
-                        "seq": row["seq"],
-                        "role": "assistant",
-                        "content": decoded.get("content") or "",
-                        "tool_calls": decoded.get("_native_tool_calls") or [],
-                    }
-                )
-            elif row["role"] == "tool" and isinstance(decoded, dict) and "_tool_call_id" in decoded:
-                result.append(
-                    {
-                        "seq": row["seq"],
-                        "role": "tool",
-                        "tool_call_id": decoded.get("_tool_call_id"),
-                        "name": decoded.get("_tool_name"),
-                        "content": decoded.get("content") or "",
-                    }
-                )
-            else:
-                result.append({"seq": row["seq"], "role": row["role"], "content": content})
-        return result
 
     def h_best_download(self, task_id: str, **_: Any):
         task = self.app.tasks.get(task_id)
@@ -1473,76 +1106,6 @@ class Handler(BaseHTTPRequestHandler):
 
     # ==================================================================
     # Model settings
-    # ==================================================================
-    def h_model_get(self, **_: Any):
-        model = self.app.model_public()
-        return 200, {
-            "model": model,
-            "capabilities": self.app.capabilities(),
-            "skills": self.app.skills.list(),
-        }
-
-    def h_model_put(self, session: dict | None = None, **_):
-        body = self._read_json()
-        existing = self.app.credentials.get("model") or {}
-        payload = {
-            "provider": str(body.get("provider") or existing.get("provider") or "openai-compatible"),
-            "base_url": str(body.get("base_url") or "").strip() or existing.get("base_url", ""),
-            "model": str(body.get("model") or "").strip(),
-            "api_key": str(body.get("api_key") or "").strip() or existing.get("api_key", ""),
-            "supports_tool_calls": bool(body.get("supports_tool_calls", existing.get("supports_tool_calls", False))),
-            "max_tokens": body.get("max_tokens", existing.get("max_tokens", 2048)),
-            "temperature": body.get("temperature", existing.get("temperature", 0.2)),
-            "timeout": body.get("timeout", existing.get("timeout", 120)),
-            "reasoning_mode": body.get("reasoning_mode", existing.get("reasoning_mode", "auto")),
-            "price_prompt_per_1k": body.get("price_prompt_per_1k", existing.get("price_prompt_per_1k")),
-            "price_completion_per_1k": body.get("price_completion_per_1k", existing.get("price_completion_per_1k")),
-            "updated_at": now(),
-        }
-        config = ModelConfig.from_payload(payload)
-        payload["base_url"] = config.base_url
-        payload["model"] = config.model
-        payload["supports_tool_calls"] = config.supports_tool_calls
-        payload["max_tokens"] = config.max_tokens
-        payload["temperature"] = config.temperature
-        payload["timeout"] = config.timeout
-        self.app.credentials.put("model", payload)
-        self.app.db.insert(
-            "INSERT INTO audit_log(actor, action, target, detail_json, created_at) VALUES(?, ?, ?, ?, ?)",
-            ((session or {}).get("username"), "model_config_update", "model", json_dumps({"model": config.model}), now()),
-        )
-        return 200, {"model": self.app.model_public()}
-
-    def h_model_delete(self, session: dict | None = None, **_):
-        self.app.credentials.delete("model")
-        return 200, {"model": {"configured": False}}
-
-    def h_model_test(self, **_: Any):
-        payload = self.app.credentials.get("model")
-        if not payload:
-            raise ApiError(400, "MODEL_NOT_CONFIGURED", "请先保存模型配置")
-        config = ModelConfig.from_payload(payload)
-        provider = make_provider(config)
-        started = time.monotonic()
-        response = provider.complete(
-            [
-                {"role": "system", "content": "You are a connectivity test. Reply with one short sentence."},
-                {"role": "user", "content": "Reply exactly: AscendForge model connection OK"},
-            ],
-            tools=False,
-        )
-        latency = int((time.monotonic() - started) * 1000)
-        return 200, {
-            "ok": True,
-            "model": response.model or config.model,
-            "latency_ms": latency,
-            "content": truncate_text(response.content, 500),
-            "usage": {"prompt_tokens": response.prompt_tokens, "completion_tokens": response.completion_tokens},
-            "tool_fallback": response.tool_fallback,
-        }
-
-    # ==================================================================
-    # Platform
     # ==================================================================
     def h_platform_status(self, **_: Any):
         return 200, {"platform": self.app.platform_public()}
@@ -1594,9 +1157,6 @@ class Handler(BaseHTTPRequestHandler):
     # ==================================================================
     def h_capabilities(self, **_: Any):
         return 200, {"capabilities": self.app.capabilities()}
-
-    def h_skills(self, **_: Any):
-        return 200, {"skills": self.app.skills.list()}
 
     def h_worker(self, **_: Any):
         return 200, {"worker": self.app.worker_state()}

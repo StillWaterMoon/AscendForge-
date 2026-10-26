@@ -8,9 +8,6 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from ascendforge.agent.providers import ModelConfig, MockProvider
-from ascendforge.agent.runtime import AgentRuntime
-from ascendforge.agent.skills import SkillRegistry
 from ascendforge.config import Settings
 from ascendforge.db import Database
 from ascendforge.experiments import add_event, attach_snapshot, create_attempt, create_snapshot
@@ -170,7 +167,7 @@ def seed_attempt(env, task: dict, *, parent: str | None = None, source: str = "/
     return env.db.query_one("SELECT * FROM attempts WHERE id=?", (attempt["id"],))
 
 
-def make_env(tmp: Path, *, provider=None, script: list | None = None):
+def make_env(tmp: Path):
     settings = make_settings(tmp)
     db = Database(settings.db_path)
     db.init()
@@ -179,33 +176,6 @@ def make_env(tmp: Path, *, provider=None, script: list | None = None):
     platform = FakePlatform()
     tasks = TaskService(db, settings, platform)
     scheduler = Scheduler(db, settings, platform, tasks)
-    model_payload = {
-        "provider": "mock",
-        "base_url": "https://mock.invalid/v1",
-        "api_key": "test-key",
-        "model": "mock-model",
-        "supports_tool_calls": False,
-        "max_tokens": 512,
-        "temperature": 0.1,
-        "timeout": 10,
-        "price_prompt_per_1k": 0.001,
-        "price_completion_per_1k": 0.002,
-    }
-    credentials.put("model", model_payload)
-    if provider is None and script is not None:
-        config = ModelConfig.from_payload(model_payload)
-        provider = MockProvider(config, script=script)
-    factory = (lambda cfg: provider) if provider is not None else None
-    runtime = AgentRuntime(
-        db,
-        settings,
-        platform,
-        tasks,
-        scheduler,
-        credentials,
-        skills=SkillRegistry(settings.root / "skills"),
-        provider_factory=factory,
-    )
     return SimpleNamespace(
         settings=settings,
         db=db,
@@ -214,6 +184,5 @@ def make_env(tmp: Path, *, provider=None, script: list | None = None):
         platform=platform,
         tasks=tasks,
         scheduler=scheduler,
-        runtime=runtime,
         tmp=tmp,
     )

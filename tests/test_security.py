@@ -11,8 +11,6 @@ from ascendforge.security import (
     hash_password,
     load_master_key,
     lookup_session,
-    mask_key,
-    model_settings_public,
     revoke_session,
     setup_token_valid,
     verify_password,
@@ -41,12 +39,6 @@ class SecurityTests(unittest.TestCase):
         raw = self.db.query_one("SELECT ciphertext FROM credentials WHERE kind='model'")["ciphertext"]
         self.assertNotIn("sk-super-secret-value", raw)
         self.assertEqual(store.get("model")["api_key"], "sk-super-secret-value")
-
-    def test_mask(self):
-        self.assertNotIn("secret", mask_key("sk-super-secret"))
-        public = model_settings_public({"api_key": "sk-abcdefghijkl", "base_url": "https://x", "model": "m"})
-        self.assertNotIn("sk-abcdefghijkl", str(public))
-        self.assertTrue(public["api_key_masked"])
 
     def test_sessions(self):
         self.db.execute(

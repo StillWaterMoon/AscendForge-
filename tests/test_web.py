@@ -92,6 +92,14 @@ class WebTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
+    def _download(self, path):
+        request = urllib.request.Request(
+            self.base + path,
+            headers={"Cookie": "; ".join(f"{c.name}={c.value}" for c in self.client.jar)},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read()
+
     def test_00_index_and_static_assets(self):
         with urllib.request.urlopen(self.base + "/", timeout=20) as response:
             html = response.read()
@@ -155,114 +163,6 @@ class WebTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload["task"]["status"], "running")
-
-    def test_03_model_settings_masked(self):
-        status, payload = self.client.request(
-            "PUT",
-            "/api/settings/model",
-            {
-                "base_url": "https://relay.example.com/v1",
-                "model": "deepseek-chat",
-                "api_key": "sk-test-secret-9999",
-                "supports_tool_calls": False,
-                "max_tokens": 1024,
-            },
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertNotIn("sk-test-secret-9999", json.dumps(payload))
-        status, payload = self.client.request("GET", "/api/settings/model")
-        self.assertEqual(status, 200)
-        self.assertNotIn("sk-test-secret-9999", json.dumps(payload))
-        self.assertIn("api_key_masked", payload["model"])
-        stored = self.app.credentials.get("model")
-        self.assertEqual(stored["api_key"], "sk-test-secret-9999")
-
-    def test_04_create_task_via_api_uses_fake_platform(self):
-        fake = FakePlatform()
-
-        def resolve(url, task_dir):
-            return fake.resolve_and_download(url, task_dir)
-
-        self.app.platform.resolve_and_download = resolve
-        status, payload = self.client.request(
-            "POST",
-            "/api/tasks",
-            {
-                "title": "API created",
-                "problem_url": "https://cannjudge.cn/hc_cann_codelabs/cann/add",
-                "config": {"max_submissions_per_task": 5},
-            },
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        task = payload["task"]
-        self.assertEqual(task["title"], "API created")
-        # API 模式沿用平台导入的模板。
-        self.assertTrue(task["template"]["files"])
-        self.assertEqual(task["config"]["execution_mode"], "api")
-        self.assertEqual(task["config"]["project_source"], "platform")
-        self.assertEqual(task["config"]["max_submissions_per_task"], 5)
-
-        status, payload = self.client.request("GET", f"/api/tasks/{task['id']}")
-        self.assertEqual(status, 200)
-
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/strategy",
-            {"strategy_prompt": "先覆盖 dtype，再优化分块"},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["config"]["strategy_prompt"], "先覆盖 dtype，再优化分块")
-
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/budget",
-            {"max_submissions_per_task": 7, "max_submissions_per_day": 4, "max_attempts": 9},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["config"]["max_submissions_per_task"], 7)
-        self.assertEqual(payload["task"]["config"]["max_submissions_per_day"], 4)
-        self.assertEqual(payload["task"]["config"]["max_attempts"], 9)
-
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/budget",
-            {"max_submissions_per_task": 0, "max_submissions_per_day": 0},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["config"]["max_submissions_per_task"], 0)
-        self.assertEqual(payload["task"]["config"]["max_submissions_per_day"], 0)
-
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/messages",
-            {"content": "下一轮优先检查 int16 的符号位"},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["messages"][-1]["content"], "下一轮优先检查 int16 的符号位")
-
-        # API 模式沿用平台模板，可以直接提交基线。
-        status, payload = self.client.request(
-            "POST",
-            f"/api/tasks/{task['id']}/baseline-submit",
-            {"confirm": True},
-            csrf=self.csrf,
-        )
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["task"]["submissions"][0]["state"], "queued")
-
-    def _download(self, path):
-        request = urllib.request.Request(
-            self.base + path,
-            headers={"Cookie": "; ".join(f"{c.name}={c.value}" for c in self.client.jar)},
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read()
 
     def test_04b_project_template_upload_and_create(self):
         fake = FakePlatform()

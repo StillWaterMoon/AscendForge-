@@ -13,8 +13,7 @@ Agent 驱动的昇腾算子自动优化平台。首个远端评测平台为 **CA
 > - 优化循环保护：编译失败的候选不会推进实验 working revision；已知的 `AscendC::And/Or` 标量掩码调用会在 snapshot 前被 preflight 拒绝；实验基线固定为当时 global best。
 > - 提交字节与快照逐字节一致；`kernel.asc` 与远端回显一致。
 > - 服务器环境（HiDevLab 950 系列）仍在审批中；本机无 NPU，因此 Ascend C 候选本地仍标为 `unavailable/untested`，不会伪造设备结果。
-> - 126 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
-> - 没有模型 API 时，可在任务详情点击 **“提交基线（手动）”**：只提交一次模板可编辑文件，用来验证真实登录/提交/结果链路，不经过模型。
+> - 89 个自动化测试通过（mock/HTTP 层）；mock 通过不等于真实 CANNJudge 接入成功。
 
 ## 界面预览
 
@@ -87,7 +86,7 @@ python -m ascendforge worker
 
 1. 打开 `http://<server>:8080`，登录 AscendForge。
 2. **连接与设置 → CANNJudge**：输入 CANNJudge 账号和密码，并填写一道用于验证权限的题目链接。官方题面、提交和结果查询仍必须经过该账号。
-3. **连接与设置 → LLM API（可选）**：填写 `base_url`、`api_key`、模型名。只有 `LLM API` 执行模式需要；本地 Codex 模式使用本机 Codex CLI 的认证，不读取这里的 API Key。
+3. **连接与设置 → CLI 运行器**：当前只启用本机 Codex CLI；它使用自己的认证，不需要 AscendForge 模型 API Key。
 4. **新建任务**：粘贴完整 CANNJudge 题目链接；当前任务固定使用本地 CLI（Codex），DeepSeek Harness / Claude Code 为后续预留。
 5. **开始**：本地 CLI 执行代码修改，宿主完成快照、排队提交和结果轮询。
 6. 任务详情可看源码、远端结果、diff、调度额度、预算；可下载 best 源码、指定版本和完整任务档案。
@@ -129,31 +128,25 @@ ascendforge/
     cannjudge.py         CANNJudge 实现
     service.py           连接/会话/题目导入
   agent/
-    protocol.py          版本化工具协议 + JSON Schema 校验
-    providers.py         OpenAI 兼容 Provider + Mock
-    runtime.py           单步 Agent Runtime
-    tools.py             宿主工具执行
-    strategy.py          根据最新结果自动派生当前阶段策略
-    prompts.py, skills.py
+    change_audit.py      有效改动审计
+    preflight.py         提交前源码检查
   execution/
     executor.py          Docker / 本地子进程隔离执行
     capabilities.py      NPU/CANN/Docker 诚实检测
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
   cli.py, db.py, states.py
-skills/                  通用优化 / Ascend / 测试生成 / CLI 启动 skill
-tests/                   126 个 unittest
+skills/                  CLI 启动 skill
+tests/                   89 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
 
-提示词分层：
+CLI 启动时注入：
 
-- 通用优化方法：`skills/optimize-operator/SKILL.md`
-- Ascend/CANNJudge 约束：`skills/optimize-ascend-operator/SKILL.md`
-- 测试生成：`skills/generate-operator-tests/SKILL.md`
-- 长期约束：任务配置里的 `strategy_prompt`，在新建任务时填写
-- 人工留言：任务详情“给 Agent 留言”，写入 `task_messages`，下一次 attempt 作为 `Operator messages` 注入
-- 当前阶段：`active_strategy` 根据最新远端结果和 best 自动派生（compile → correctness → performance），随任务进展变化
-- 实验/修订：`experiments` 固定 `baseline_attempt_id`、`working_attempt_id`、`hypothesis`、`search_space`、`success_criteria` 和实验预算；attempt 通过 `experiment_id` 归属实验；新实验从 performance best / correctness baseline 开始
+- `skills/start-operator-optimization/SKILL.md`
+- `skills/start-operator-optimization/TOOLS.md`
+- 题目 URL、workspace、模板/空项目说明、可编辑与只读文件、评分目标
+
+实验记录仍保留在 `experiments` 表供任务详情使用，但不再有 API Agent 提示词分层。
 - 旧数据：已有 attempt 自动归入一个 `legacy` experiment，不伪造历史猜想；下一次新建 attempt 会开启新实验
 - 覆盖范围：`all_passed` 要求声明的预期测试点全部完成且通过；只有部分返回时记为 `testset_passed`/`current_testset_only`，不冒充完整通过
 - 可比性：性能结果带 `comparison_key`（题目版本、测试点集合、CANN/SoC、时间单位和环境指纹）；不同 key 的耗时不会混入同一个 performance best
@@ -163,7 +156,7 @@ docs/                    架构、能力矩阵、阶段 0 报告、运维、安�
 - 本地 Codex：`codex-run` 做只读检查；`codex-loop` 通过 Codex app-server 为每个任务建立一个持久 thread，发送真实 `SKILL.md` + `TOOLS.md`，并只暴露 `read_problem`、`submit_official`、`read_official_evaluation` 三个平台工具；Codex 自己读题、改 workspace、提交和轮询结果，不设固定轮数，直到人工暂停；Web 的“继续任务”恢复同一会话
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
-- 执行模式：当前 UI 只暴露本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入；LLM API 后端暂留但不再作为 UI 选项
+- 执行模式：只保留本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入
 - 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace 和日志；running 或存在未知/发送中提交时拒绝删除，审计日志保留
 - Codex 执行边界：暂停采用软暂停，保留 Codex 进程和 app-server thread，只停止新 turn；继续时在同一会话上恢复。停止仍清理进程树。Codex 模式跳过累计 attempt/model/token/runtime/stall 上限，但仍保留提交限频、额度、在途、幂等和 unknown 对账
 - Codex 真实闭环：已在本机对 CopySign 跑通一轮（工作区修改 → snapshot → 官方提交 → 15/15 Pass → 会话/usage 记录）；结果与限制见 [Codex 真实闭环](docs/attempts/codex-loop-real-round.md)

@@ -143,32 +143,6 @@ class CredentialStore:
         self.db.execute("DELETE FROM credentials WHERE kind=?", (kind,))
 
 
-def mask_key(value: str | None) -> str:
-    if not value:
-        return ""
-    return redact(value, keep=4)
-
-
-def model_settings_public(payload: dict | None) -> dict:
-    if not payload:
-        return {"configured": False}
-    return {
-        "configured": True,
-        "base_url": payload.get("base_url", ""),
-        "model": payload.get("model", ""),
-        "provider": payload.get("provider", "openai-compatible"),
-        "api_key_masked": mask_key(payload.get("api_key")),
-        "supports_tool_calls": bool(payload.get("supports_tool_calls", False)),
-        "max_tokens": payload.get("max_tokens", 2048),
-        "temperature": payload.get("temperature", 0.2),
-        "timeout": payload.get("timeout", 120),
-        "reasoning_mode": payload.get("reasoning_mode", "auto"),
-        "price_prompt_per_1k": payload.get("price_prompt_per_1k"),
-        "price_completion_per_1k": payload.get("price_completion_per_1k"),
-        "updated_at": payload.get("updated_at"),
-    }
-
-
 def platform_session_public(payload: dict | None) -> dict:
     if not payload:
         return {"connected": False}

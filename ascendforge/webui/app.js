@@ -478,23 +478,6 @@ async function renderDashboard() {
   if (Math.abs(window.scrollY - scroll) > 1) window.scrollTo(0, scroll);
 }
 
-function phaseLabel(phase) {
-  return ({ baseline: '建立基线', compile: '编译修复', runtime: '运行修复', correctness: '正确性', performance: '性能优化', verify: '确认结果' })[phase] || phase || '等待结果';
-}
-
-function codexPhaseLabel(phase) {
-  return ({
-    starting_process: '启动 Codex 进程',
-    starting_session: '建立 Codex 会话',
-    resuming_session: '恢复 Codex 会话',
-    session_ready: '会话已恢复',
-    turn_started: 'Codex 执行中',
-    tool_call: 'Codex 调用工具',
-    turn_completed: '本轮执行完成',
-    turn_failed: '本轮执行失败',
-  })[phase] || (phase ? phase : '等待 Codex 事件');
-}
-
 function limitLabel(value) {
   return value === 0 || value === null || value === undefined ? '不限' : String(value);
 }
@@ -511,15 +494,6 @@ function renderBestCompact(best) {
   }
   if (best.raw_status) return `<span class="mono">${esc(best.raw_status)}</span>`;
   return '<span class="faint">—</span>';
-}
-
-function renderBest(best) {
-  if (!best) return '<span class="faint">—</span>';
-  const metric = best.metric;
-  if (metric && typeof metric === 'object') {
-    return `<span class="mono">${esc(metric.metric)}=${esc(metric.value)}</span><div class="faint small">attempt ${esc(String(best.attempt_id || '').slice(0, 12))}</div>`;
-  }
-  return `<span class="mono">${esc(best.raw_status || '通过')}</span>`;
 }
 
 async function uploadProjectTemplate(file) {
@@ -695,15 +669,10 @@ async function renderTask(taskId) {
       <div id="task-tab-body">${renderTaskTab(task)}</div>
     </div>`;
 
-  $$('[data-task-action]').forEach((button) => {
-    button.addEventListener('click', () => taskAction(task.id, button.dataset.taskAction));
-  });
   const pauseButton = $('[data-pause-task]');
   if (pauseButton) pauseButton.addEventListener('click', () => pauseTask(task.id));
   const continueButton = $('[data-continue-task]');
   if (continueButton) continueButton.addEventListener('click', () => continueTask(task.id));
-  $$('[data-message]').forEach((button) => button.addEventListener('click', () => openMessageModal(task)));
-  $$('[data-experiment-edit]').forEach((button) => button.addEventListener('click', () => openExperimentModal(task)));
   $$('[data-task-tab]').forEach((button) => {
     button.addEventListener('click', () => { state.taskTab = button.dataset.taskTab; renderTask(task.id).catch(() => {}); });
   });
@@ -717,254 +686,6 @@ async function renderTask(taskId) {
     });
   });
   window.scrollTo(0, scroll);
-}
-
-async function openBudgetModal(task) {
-  const config = task.config || {};
-  const quota = task.quota || {};
-  const sent = quota.sends_total ?? 0;
-  const candidates = task.counts?.candidates ?? 0;
-  openModal('调整运行上限', `
-    <form id="budget-form" class="stack">
-      <div class="alert info">提交上限可以动态调整，但不能绕过调度器。当前已提交 <strong>${esc(sent)}</strong> 次，候选 <strong>${esc(candidates)}</strong> 个；调到已用值以下会在下一次调度时停止。</div>
-      <div class="form-grid">
-        <div class="field"><label for="budget-task-subs">每题提交上限</label><div class="row"><input id="budget-task-subs" type="number" min="0" max="500" value="${esc(config.max_submissions_per_task ?? 30)}"><label class="checkbox"><input id="budget-task-unlimited" type="checkbox" ${Number(config.max_submissions_per_task) === 0 ? 'checked' : ''}>不限</label></div></div>
-        <div class="field"><label for="budget-day-subs">每日提交上限</label><div class="row"><input id="budget-day-subs" type="number" min="0" max="200" value="${esc(config.max_submissions_per_day ?? 20)}"><label class="checkbox"><input id="budget-day-unlimited" type="checkbox" ${Number(config.max_submissions_per_day) === 0 ? 'checked' : ''}>不限</label></div></div>
-        <div class="field"><label for="budget-attempts">最多尝试轮数</label><input id="budget-attempts" type="number" min="1" max="500" value="${esc(config.max_attempts ?? 30)}"></div>
-        <div class="field"><label for="budget-stall">停滞轮数停止</label><input id="budget-stall" type="number" min="1" max="100" value="${esc(config.max_stall_rounds ?? 5)}"></div>
-        <div class="field"><label for="budget-model-calls">模型调用上限</label><div class="row"><input id="budget-model-calls" type="number" min="0" max="5000" value="${esc(config.max_model_calls ?? 120)}"><label class="checkbox"><input id="budget-model-unlimited" type="checkbox" ${Number(config.max_model_calls) === 0 ? 'checked' : ''}>不限</label></div></div>
-        <div class="field"><label for="budget-tokens">Token 上限</label><div class="row"><input id="budget-tokens" type="number" min="0" max="200000000" value="${esc(config.max_tokens ?? 3000000)}"><label class="checkbox"><input id="budget-token-unlimited" type="checkbox" ${Number(config.max_tokens) === 0 ? 'checked' : ''}>不限</label></div></div>
-        <div class="field"><label for="budget-interval">最小提交间隔（秒，≥60）</label><input id="budget-interval" type="number" min="60" max="86400" value="${esc(config.min_submit_interval_sec ?? 300)}"></div>
-        <div class="field"><label for="budget-inflight">同账号在途上限</label><input id="budget-inflight" type="number" min="1" max="3" value="${esc(config.max_inflight ?? 1)}"></div>
-        <div class="field"><label for="budget-poll">结果轮询间隔（秒）</label><input id="budget-poll" type="number" min="3" max="600" value="${esc(config.poll_interval_sec ?? 10)}"></div>
-      </div>
-      <div class="hint">“不限”等于 0，调度器会按无限上限处理；模型调用、Token 和运行时长仍由原预算控制。</div>
-      <div class="alert error" id="budget-error" hidden></div>
-      <div class="form-actions">
-        <button class="btn" type="button" data-modal-close>取消</button>
-        <button class="btn btn-primary" type="submit">保存上限</button>
-      </div>
-    </form>`);
-  $('#budget-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#budget-error');
-    errorBox.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
-    try {
-      await api(`/api/tasks/${encodeURIComponent(task.id)}/budget`, {
-        method: 'POST',
-        body: {
-          max_submissions_per_task: $('#budget-task-unlimited').checked ? 0 : Number($('#budget-task-subs').value),
-          max_submissions_per_day: $('#budget-day-unlimited').checked ? 0 : Number($('#budget-day-subs').value),
-          max_attempts: Number($('#budget-attempts').value),
-          max_stall_rounds: Number($('#budget-stall').value),
-          max_model_calls: $('#budget-model-unlimited').checked ? 0 : Number($('#budget-model-calls').value),
-          max_tokens: $('#budget-token-unlimited').checked ? 0 : Number($('#budget-tokens').value),
-          min_submit_interval_sec: Number($('#budget-interval').value),
-          max_inflight: Number($('#budget-inflight').value),
-          poll_interval_sec: Number($('#budget-poll').value),
-        },
-        requestId: uuid(),
-      });
-      closeModal();
-      toast('运行上限已更新', 'success');
-      renderTask(task.id).catch(() => {});
-    } catch (err) {
-      errorBox.hidden = false;
-      errorBox.textContent = err.message || '保存失败';
-      button.disabled = false;
-    }
-  });
-}
-
-async function openCodexModal(task) {
-  openModal('本地 Codex 运行', `
-    <form id="codex-form" class="stack">
-      <div class="alert info">Codex 会建立一个持续会话，通过已注册的工具读写任务、保存候选和提交评测；没有固定轮数，只有你手动暂停/停止才会结束。Codex 不能直接提交 CANNJudge，也不能访问凭据。</div>
-      <div class="field"><label for="codex-prompt">额外优化指令（可选）</label><textarea id="codex-prompt" rows="4" placeholder="例如：只做 float32 的向量化；保持其他 dtype 和接口不变。"></textarea></div>
-      <div class="faint small">运行日志会写入服务器日志目录；不会把 Codex 的私有推理当作文本保存。</div>
-      <div class="alert error" id="codex-error" hidden></div>
-      <div class="form-actions">
-        <button class="btn" type="button" data-modal-close>取消</button>
-        <button class="btn btn-primary" type="submit">启动 Codex</button>
-      </div>
-    </form>`);
-  $('#codex-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#codex-error');
-    errorBox.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
-    try {
-      const data = await api(`/api/tasks/${encodeURIComponent(task.id)}/codex-run`, {
-        method: 'POST',
-        body: {
-          prompt: $('#codex-prompt').value,
-        },
-        requestId: uuid(),
-      });
-      closeModal();
-      toast(`Codex 已启动，PID ${data.pid}；日志 ${data.log}`, 'success');
-      renderTask(task.id).catch(() => {});
-    } catch (err) {
-      errorBox.hidden = false;
-      errorBox.textContent = err.message || '启动失败';
-      button.disabled = false;
-    }
-  });
-}
-
-async function openExperimentModal(task) {
-  const experiment = task.experiment || {};
-  const active = Boolean(experiment.id && experiment.status === 'active');
-  const baseline = experiment.baseline_attempt_id || task.performance_best_attempt_id || task.best_attempt_id || '';
-  const search = experiment.search_space ? JSON.stringify(experiment.search_space, null, 2) : '';
-  const criteria = experiment.success_criteria ? JSON.stringify(experiment.success_criteria, null, 2) : '';
-  const budget = experiment.budget ? JSON.stringify(experiment.budget, null, 2) : '';
-  openModal('实验设置', `
-    <form id="experiment-form" class="stack">
-      <div class="alert info">实验猜想会固定基线和工作版本；实验期间全局 best 变化不会改变本实验 baseline。参数实验建议从 performance best 构造，而不是沿上一修订继续叠加改动。</div>
-      <div class="field"><label for="experiment-hypothesis">Hypothesis（本轮要验证什么）</label><textarea id="experiment-hypothesis" rows="4" placeholder="例如：CopySign 的瓶颈是 tile/per-tile 开销；在保持 15/15 的前提下，tile 和 depth 的组合会影响耗时。">${esc(experiment.hypothesis || '')}</textarea></div>
-      <label class="checkbox"><input id="experiment-new" type="checkbox" ${active ? '' : 'checked'}>开始新实验（关闭当前实验并固定新 baseline）</label>
-      <div class="field"><label for="experiment-baseline">Baseline attempt</label><input id="experiment-baseline" value="${esc(baseline)}" ${active ? 'disabled' : ''}></div>
-      <div class="form-grid">
-        <div class="field"><label for="experiment-search">Search space（JSON）</label><textarea id="experiment-search" rows="5" placeholder='{"tile_bytes":[8192,32768],"depth":[1,2]}'>${esc(search)}</textarea></div>
-        <div class="field"><label for="experiment-criteria">Success criteria（JSON）</label><textarea id="experiment-criteria" rows="5" placeholder='{"all_passed":true,"performance_metric":"max_time","min_improvement_pct":2}'>${esc(criteria)}</textarea></div>
-      </div>
-      <div class="field"><label for="experiment-budget">Experiment budget（JSON，可选）</label><textarea id="experiment-budget" rows="3" placeholder='{"max_revisions":8,"max_submissions":4}'>${esc(budget)}</textarea></div>
-      <div class="alert error" id="experiment-error" hidden></div>
-      <div class="form-actions">
-        <button class="btn" type="button" data-modal-close>取消</button>
-        <button class="btn btn-primary" type="submit">${active ? '保存实验计划' : '开始实验'}</button>
-      </div>
-    </form>`);
-  const newExperiment = $('#experiment-new');
-  const baselineInput = $('#experiment-baseline');
-  const submitButton = $('#experiment-form button[type="submit"]');
-  const syncExperimentMode = () => {
-    baselineInput.disabled = active && !newExperiment.checked;
-    submitButton.textContent = newExperiment.checked ? '开始新实验' : '保存实验计划';
-  };
-  newExperiment.addEventListener('change', syncExperimentMode);
-  syncExperimentMode();
-  $('#experiment-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#experiment-error');
-    errorBox.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
-    const parseJson = (id) => {
-      const value = $(id).value.trim();
-      if (!value) return {};
-      return JSON.parse(value);
-    };
-    try {
-      const body = {
-        hypothesis: $('#experiment-hypothesis').value,
-        new_experiment: newExperiment.checked,
-        baseline_attempt_id: $('#experiment-baseline').value.trim(),
-        search_space: parseJson('#experiment-search'),
-        success_criteria: parseJson('#experiment-criteria'),
-        budget: parseJson('#experiment-budget'),
-      };
-      await api(`/api/tasks/${encodeURIComponent(task.id)}/experiment`, {
-        method: 'POST',
-        body,
-        requestId: uuid(),
-      });
-      closeModal();
-      toast(body.new_experiment ? '新实验已固定基线' : '实验计划已保存', 'success');
-      renderTask(task.id).catch(() => {});
-    } catch (err) {
-      errorBox.hidden = false;
-      errorBox.textContent = err.message || '保存失败';
-      button.disabled = false;
-    }
-  });
-}
-
-async function openMessageModal(task) {
-  const messages = task.messages || [];
-  const thread = messages.length
-    ? messages.map((item) => `<div class="message-row">
-        <div class="message-meta"><strong>${esc(item.author || '你')}</strong><span>${esc(fmtTime(item.created_at))}</span></div>
-        <div class="message-body">${esc(item.content || '')}</div>
-      </div>`).join('')
-    : '<div class="empty">还没有留言。告诉 Agent 下一轮要关注什么。</div>';
-  openModal('给 Agent 留言', `
-    <div class="alert info">这是一条异步指令：保存后，下一次新建的 attempt 会读到它。Agent 不会即时聊天，而会在下一轮的 hypothesis / 实验记录里体现是否采纳。</div>
-    <div class="message-thread">${thread}</div>
-    <form id="message-form" class="stack" style="margin-top:14px">
-      <div class="field"><label for="message-text">新的需求 / 观察 / 约束</label>
-        <textarea id="message-text" rows="5" maxlength="4000" placeholder="例如：现在先不要动性能，优先确认 int16 的符号位；或者：下一轮试试 DataCopyPad 的尾部对齐。"></textarea>
-        <div class="hint">最多 4000 字符。会作为 operator message 注入下一次 attempt 的上下文。</div>
-      </div>
-      <div class="alert error" id="message-error" hidden></div>
-      <div class="form-actions">
-        <button class="btn" type="button" data-modal-close>关闭</button>
-        <button class="btn btn-primary" type="submit">发送给 Agent</button>
-      </div>
-    </form>`);
-  $('#message-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#message-error');
-    errorBox.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
-    try {
-      await api(`/api/tasks/${encodeURIComponent(task.id)}/messages`, {
-        method: 'POST',
-        body: { content: $('#message-text').value.trim() },
-        requestId: uuid(),
-      });
-      closeModal();
-      toast('留言已保存；下一次 attempt 会读取', 'success');
-      renderTask(task.id).catch(() => {});
-    } catch (err) {
-      errorBox.hidden = false;
-      errorBox.textContent = err.message || '发送失败';
-      button.disabled = false;
-    }
-  });
-}
-
-async function openStrategyModal(task) {
-  const current = String((task.config || {}).strategy_prompt || '');
-  openModal('题目策略', `
-    <form id="strategy-form" class="stack">
-      <div class="alert info">通用优化方法由 <span class="mono">optimize-operator</span> skill 提供。这里只写本题的目标、约束和待验证假设，例如“先覆盖全部 dtype，再优化 UB 分块”。</div>
-      <div class="field"><label for="strategy-text">长期目标 / 约束</label>
-        <textarea id="strategy-text" rows="10" maxlength="8000" placeholder="例如：先保证 15/15 Pass；再优化 UB 分块与搬运重叠。">${esc(current)}</textarea>
-        <div class="hint">这里只保存长期目标/约束，不会自动改写；系统会根据最新结果自动派生“当前策略”。保存后只影响下一次新建的 attempt。</div>
-      </div>
-      <div class="alert error" id="strategy-error" hidden></div>
-      <div class="form-actions">
-        <button class="btn" type="button" data-modal-close>取消</button>
-        <button class="btn btn-primary" type="submit">保存策略</button>
-      </div>
-    </form>`);
-  $('#strategy-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const errorBox = $('#strategy-error');
-    errorBox.hidden = true;
-    const button = event.target.querySelector('button[type="submit"]');
-    button.disabled = true;
-    try {
-      await api(`/api/tasks/${encodeURIComponent(task.id)}/strategy`, {
-        method: 'POST',
-        body: { strategy_prompt: $('#strategy-text').value.trim() },
-        requestId: uuid(),
-      });
-      closeModal();
-      toast('题目策略已保存', 'success');
-      renderTask(task.id).catch(() => {});
-    } catch (err) {
-      errorBox.hidden = false;
-      errorBox.textContent = err.message || '保存失败';
-      button.disabled = false;
-    }
-  });
 }
 
 function taskTabButton(key, label) {
@@ -988,33 +709,6 @@ function renderTaskAlert(task, quota) {
     return `<div class="alert info" style="margin-bottom:16px">最近错误：${esc(task.last_error_code || '')} ${esc(task.last_error)}</div>`;
   }
   return '';
-}
-
-function budgetBar(label, value, max, note = '') {
-  const unlimited = max === null || max === undefined || Number(max) === 0;
-  const pct = unlimited ? 0 : Math.min(100, Math.max(0, (Number(value) / Number(max)) * 100));
-  return `<div style="margin-bottom:12px">
-    <div class="row-between small"><span class="muted">${esc(label)}</span><span class="mono">${esc(value)} / ${unlimited ? '不限' : esc(max)}</span></div>
-    <div class="budget-track">
-      <div class="budget-fill" style="width:${pct}%"></div>
-    </div>
-    ${note ? `<div class="faint" style="font-size:11px;margin-top:3px">${esc(note)}</div>` : ''}
-  </div>`;
-}
-
-function renderPerformanceBest(task) {
-  const best = task.performance_best;
-  if (!best || best.value === undefined || best.value === null) return '<span class="faint">性能未知</span>';
-  const unit = best.unit ? ' ' + esc(best.unit) : '';
-  return `${esc(best.metric)} = ${esc(Number(best.value).toFixed(2))}${unit}`;
-}
-
-function renderBestValue(best) {
-  if (!best) return '<span class="faint">—</span>';
-  if (best.metric && typeof best.metric === 'object') {
-    return `${esc(best.metric.metric)} = ${esc(best.metric.value)}${best.metric.unit ? ' ' + esc(best.metric.unit) : ''}`;
-  }
-  return esc(best.raw_status || '通过');
 }
 
 function ojResult(normalized) {
@@ -1127,32 +821,6 @@ function renderTaskTab(task) {
     }).join('')}</tbody></table></div>`;
 }
 
-function renderEvent(event) {
-  return `<div class="log-item">
-    <span class="log-time">${esc(fmtTime(event.created_at))}</span>
-    <span class="log-type">${esc(event.type)}</span>
-    <span class="log-payload">${esc(JSON.stringify(event.payload || {}).slice(0, 800))}</span>
-  </div>`;
-}
-
-async function baselineSubmit(taskId) {
-  const ok = confirm(
-    '这会用题目模板的可编辑文件创建一份快照，并通过调度器向 CANNJudge 真实提交一次（消耗一次提交额度，不需要模型）。\n\n确认提交基线？'
-  );
-  if (!ok) return;
-  try {
-    await api(`/api/tasks/${encodeURIComponent(taskId)}/baseline-submit`, {
-      method: 'POST',
-      body: { confirm: true },
-    });
-    toast('人工基线已排队；worker 将在限频允许时发送', 'success');
-    await renderTask(taskId);
-  } catch (err) {
-    toast(err.message || '基线提交失败', 'error');
-    if (!err.handled) await renderTask(taskId).catch(() => {});
-  }
-}
-
 async function pauseTask(taskId) {
   try {
     await api(`/api/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST', body: {} });
@@ -1191,34 +859,6 @@ async function continueTask(taskId) {
     await renderTask(taskId);
   } catch (err) {
     toast(err.message || '继续失败', 'error');
-    if (!err.handled) await renderTask(taskId).catch(() => {});
-  }
-}
-
-async function continueOptimization(taskId) {
-  const ok = confirm('将保留已有快照和远端结果，从当前任务继续 Agent 自动优化。需要模型已配置。确认继续？');
-  if (!ok) return;
-  try {
-    await api(`/api/tasks/${encodeURIComponent(taskId)}/continue-optimization`, {
-      method: 'POST',
-      body: {},
-    });
-    toast('已恢复任务，Agent 将基于已有反馈创建新版本', 'success');
-    await renderTask(taskId);
-  } catch (err) {
-    toast(err.message || '恢复失败', 'error');
-    if (!err.handled) await renderTask(taskId).catch(() => {});
-  }
-}
-
-async function taskAction(taskId, action) {
-  if (action === 'stop' && !confirm('停止会取消尚未发送的排队提交；已经提交到 CANNJudge、等待或已有结果的提交不能撤回。确认停止？')) return;
-  try {
-    await api(`/api/tasks/${encodeURIComponent(taskId)}/${action}`, { method: 'POST', body: {} });
-    toast(`已${action === 'start' ? '开始' : action === 'pause' ? '暂停' : action === 'resume' ? '恢复' : '停止'}任务`, 'success');
-    await renderTask(taskId);
-  } catch (err) {
-    toast(err.message || '操作失败', 'error');
     if (!err.handled) await renderTask(taskId).catch(() => {});
   }
 }
