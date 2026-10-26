@@ -18,7 +18,6 @@ class SkillTests(unittest.TestCase):
         self.assertEqual(
             names,
             {
-                "build-cannjudge-workbench",
                 "optimize-operator",
                 "optimize-ascend-operator",
                 "generate-operator-tests",

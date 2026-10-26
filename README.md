@@ -140,7 +140,7 @@ ascendforge/
     capabilities.py      NPU/CANN/Docker 诚实检测
   mcp/                   任务级 MCP：题目读取 + 两类提交工具 + 固定测试服务器评测
   cli.py, db.py, states.py
-skills/                  通用优化 / Ascend / 测试生成 / 工作台 / CLI 启动 skill
+skills/                  通用优化 / Ascend / 测试生成 / CLI 启动 skill
 tests/                   126 个 unittest
 deploy/                  systemd / Docker / Caddy / Nginx
 docs/                    架构、能力矩阵、阶段 0 报告、运维、安全、验收
