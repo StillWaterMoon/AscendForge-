@@ -479,7 +479,7 @@ class Handler(BaseHTTPRequestHandler):
         except PlatformError as exc:
             self._send_json(self._platform_error_status(exc.code), {"error": exc.public()})
         except RecoveryError as exc:
-            status = 404 if exc.code == "RECOVERY_NOT_FOUND" else 409 if exc.code in ("RECOVERY_LOCKED", "BAD_STATE") else 400
+            status = 404 if exc.code == "RECOVERY_NOT_FOUND" else 409 if exc.code in ("RECOVERY_LOCKED", "RECOVERY_REQUIRES_PASS_BASELINE", "BAD_STATE") else 400
             self._send_json(status, {"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
         except SnapshotError as exc:
             self._send_json(500, {"error": {"code": "SNAPSHOT_ERROR", "message": str(exc)}})

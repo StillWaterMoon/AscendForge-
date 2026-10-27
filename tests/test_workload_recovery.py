@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ascendforge.experiments import normalize_result, read_snapshot
 from ascendforge.util import canonical_json
 from ascendforge.workload_recovery import RecoveryError, WorkloadRecoveryService, fingerprint_for_task
 from tests.helpers import make_env, seed_attempt, seed_task
@@ -14,6 +15,20 @@ class WorkloadRecoveryTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="af-recovery-"))
         self.env = make_env(self.tmp)
         self.task = seed_task(self.env, status="running", title="Recovery task")
+        self.pass_attempt = seed_attempt(self.env, self.task, source="// passing baseline\n")
+        normalized = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 1},
+            expected_testcases_count=1,
+        )
+        self.env.db.execute(
+            "UPDATE attempts SET status='finished', result_json=?, normalized_json=? WHERE id=?",
+            (canonical_json({"status": "Pass"}), canonical_json(normalized), self.pass_attempt["id"]),
+        )
+        self.env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=? WHERE id=?",
+            (self.pass_attempt["id"], self.pass_attempt["id"], self.task["id"]),
+        )
+        self.task = self.env.tasks.get(self.task["id"])
         self.service = WorkloadRecoveryService(
             self.env.db, self.env.settings, self.env.tasks, self.env.scheduler
         )
@@ -50,7 +65,17 @@ class WorkloadRecoveryTests(unittest.TestCase):
         (workspace / "evidence.md").write_text("evidence", encoding="utf-8")
         return attempt
 
+    def test_start_requires_a_passing_baseline(self):
+        other = seed_task(self.env, status="running", title="No pass yet")
+        self.assertFalse(self.service.summary_for_task(other["id"])["can_start"])
+        with self.assertRaises(RecoveryError) as ctx:
+            self.service.start(other["id"])
+        self.assertEqual(ctx.exception.code, "RECOVERY_REQUIRES_PASS_BASELINE")
+
     def test_start_creates_hidden_task_and_independent_workspace(self):
+        summary = self.service.summary_for_task(self.task["id"])
+        self.assertTrue(summary["can_start"])
+        self.assertEqual(summary["base_attempt_id"], self.pass_attempt["id"])
         result = self._start()
         self.assertEqual(result["mode"], "started")
         fp, job, hidden = self._job_and_hidden()
@@ -61,7 +86,15 @@ class WorkloadRecoveryTests(unittest.TestCase):
         source_paths = {item["path"] for item in (self.task.get("template_json") or {}).get("files", [])}
         hidden_paths = {item["path"] for item in (hidden.get("template_json") or {}).get("files", [])}
         self.assertEqual(hidden_paths, source_paths)
-        self.assertIsNone(self.env.tasks.get(self.task["id"]).get("best_attempt_id"))
+        self.assertEqual(job["base_attempt_id"], self.pass_attempt["id"])
+        base = self.env.db.query_one(
+            "SELECT * FROM attempts WHERE task_id=? AND provider='recovery-base'", (hidden["id"],)
+        )
+        self.assertIsNotNone(base)
+        self.assertEqual(hidden["best_attempt_id"], base["id"])
+        source_snapshot = read_snapshot(self.env.db, self.env.settings, self.pass_attempt["snapshot_id"])
+        base_snapshot = read_snapshot(self.env.db, self.env.settings, base["snapshot_id"])
+        self.assertEqual(base_snapshot["files"], source_snapshot["files"])
 
     def test_diagnostic_records_stay_out_of_optimization_task(self):
         self._start()
@@ -71,14 +104,14 @@ class WorkloadRecoveryTests(unittest.TestCase):
         self.env.scheduler.request_submission(hidden["id"], attempt["id"])
         self.assertEqual(
             int(self.env.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (self.task["id"],))),
-            0,
+            1,
         )
         self.assertEqual(
             int(self.env.db.scalar("SELECT COUNT(*) FROM submissions WHERE task_id=?", (self.task["id"],))),
             0,
         )
         self.assertEqual(
-            int(self.env.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=?", (hidden["id"],))),
+            int(self.env.db.scalar("SELECT COUNT(*) FROM attempts WHERE task_id=? AND diagnostic=1", (hidden["id"],))),
             1,
         )
 
@@ -216,6 +249,19 @@ class WorkloadRecoveryTests(unittest.TestCase):
         with patch("ascendforge.codex_loop.run_codex_agent", return_value={"turns": 1}):
             self.service.run_job(job["id"])
         other = seed_task(self.env, status="running", title="Other optimizer")
+        other_pass = seed_attempt(self.env, other, source="// other pass\n")
+        other_norm = normalize_result(
+            {"status": "Pass", "result": [{"testcase_status": "Pass"}], "score": 1},
+            expected_testcases_count=1,
+        )
+        self.env.db.execute(
+            "UPDATE attempts SET status='finished', result_json=?, normalized_json=? WHERE id=?",
+            (canonical_json({"status": "Pass"}), canonical_json(other_norm), other_pass["id"]),
+        )
+        self.env.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=? WHERE id=?",
+            (other_pass["id"], other_pass["id"], other["id"]),
+        )
         with patch.object(self.service, "launch") as launch:
             result = self.service.start(other["id"])
         self.assertEqual(result["mode"], "cache")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OJ 反馈数据逆向"
+  short_description: "利用 Pass、WA 与错误占比，以少量提交恢复评测元信息和统计特征"
+  default_prompt: "使用 $oj-feedback-reverse-engineering，根据题面、提交代码和评测反馈，以尽量少的提交逆向必要的测试数据特征。"

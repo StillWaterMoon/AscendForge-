@@ -19,7 +19,14 @@ from typing import Any
 
 from .config import Settings
 from .db import Database
-from .experiments import add_event
+from .experiments import (
+    add_event,
+    attach_snapshot,
+    create_attempt,
+    get_attempt,
+    read_snapshot,
+    update_attempt,
+)
 from .scheduler import Scheduler
 from .tasks import TaskError, TaskService
 from .util import canonical_json, json_dumps, json_loads, new_id, now
@@ -199,6 +206,76 @@ class WorkloadRecoveryService:
         self.scheduler = scheduler
 
     # -- lookup -------------------------------------------------------
+    @staticmethod
+    def _is_passing_result(normalized: dict) -> bool:
+        outcome = str(normalized.get("outcome") or "").strip().lower()
+        if outcome in ("passed", "pass", "all_passed"):
+            return True
+        raw = str(normalized.get("raw_status") or "").strip().lower()
+        total = int(normalized.get("testcase_total") or 0)
+        passed = int(normalized.get("testcase_passed") or 0)
+        if total > 0 and passed == total:
+            return True
+        return raw.startswith("pass") and not normalized.get("testcase_failed")
+
+    def passing_attempt(self, task_id: str) -> dict | None:
+        task = self.tasks.get(task_id)
+        candidate_ids: list[str] = []
+        if task.get("best_attempt_id"):
+            candidate_ids.append(task["best_attempt_id"])
+        for row in self.db.query(
+            "SELECT * FROM attempts WHERE task_id=? AND snapshot_id IS NOT NULL ORDER BY ordinal DESC",
+            (task_id,),
+        ):
+            if row["id"] not in candidate_ids:
+                candidate_ids.append(row["id"])
+        for attempt_id in candidate_ids:
+            attempt = get_attempt(self.db, attempt_id)
+            if not attempt or not attempt.get("snapshot_id"):
+                continue
+            normalized = json_loads(attempt.get("normalized_json"), {})
+            if isinstance(normalized, dict) and self._is_passing_result(normalized):
+                return attempt
+        return None
+
+    def _seed_passing_base(self, hidden: dict, base: dict) -> dict:
+        source_snapshot = read_snapshot(self.db, self.settings, base["snapshot_id"])
+        attempt = create_attempt(
+            self.db,
+            hidden["id"],
+            provider="recovery-base",
+            prompt_version="recovery-base",
+        )
+        snapshot = attach_snapshot(
+            self.db,
+            self.settings,
+            task_id=hidden["id"],
+            attempt_id=attempt["id"],
+            files=source_snapshot["files"],
+        )
+        update_attempt(
+            self.db,
+            attempt["id"],
+            snapshot_id=snapshot["id"],
+            status="finished",
+            hypothesis="从优化任务的 Pass 提交恢复的只读起点",
+            summary=f"base attempt {base['id']}",
+            result_json=base.get("result_json"),
+            normalized_json=base.get("normalized_json"),
+        )
+        self.db.execute(
+            "UPDATE tasks SET best_attempt_id=?, performance_best_attempt_id=?, updated_at=? WHERE id=?",
+            (attempt["id"], attempt["id"], now(), hidden["id"]),
+        )
+        add_event(
+            self.db,
+            hidden["id"],
+            attempt["id"],
+            "recovery_base_loaded",
+            {"source_attempt_id": base["id"], "source_snapshot_id": base["snapshot_id"]},
+        )
+        return attempt
+
     def summary_for_task(self, task_id: str) -> dict:
         task = self.tasks.get(task_id)
         fp = fingerprint_for_task(task)
@@ -206,6 +283,7 @@ class WorkloadRecoveryService:
         job = self.latest_job(fp["spec_key"])
         active = self.active_job(fp["spec_key"])
         diagnostic_rows = self.diagnostics(job["id"]) if job else []
+        base = self.passing_attempt(task_id)
         return {
             "fingerprint": fp,
             "spec": self.spec_public(spec) if spec else None,
@@ -214,6 +292,9 @@ class WorkloadRecoveryService:
             "has_cache": bool(spec and spec["status"] == "verified"),
             "diagnostics": len(diagnostic_rows),
             "diagnostic_rows": diagnostic_rows[:30],
+            "can_start": bool(base),
+            "base_attempt_id": base["id"] if base else None,
+            "requires_pass_baseline": not bool(base),
         }
 
     def latest_spec(self, spec_key: str) -> dict | None:
@@ -281,6 +362,8 @@ class WorkloadRecoveryService:
             "spec_key": row["spec_key"],
             "task_id": row["task_id"],
             "workspace_task_id": row["workspace_task_id"],
+            "base_attempt_id": row.get("base_attempt_id"),
+            "base_snapshot_id": row.get("base_snapshot_id"),
             "status": row["status"],
             "phase": config.get("codex_resume_phase") or row.get("phase"),
             "progress": json_loads(row.get("progress_json"), {}),
@@ -301,6 +384,12 @@ class WorkloadRecoveryService:
     # -- start / reuse -------------------------------------------------
     def start(self, task_id: str, *, actor: str | None = None, force: bool = False) -> dict:
         task = self.tasks.get(task_id)
+        base = self.passing_attempt(task_id)
+        if not base:
+            raise RecoveryError(
+                "RECOVERY_REQUIRES_PASS_BASELINE",
+                "逆向评测需要优化任务先产生一个 Pass 提交；当前没有可用的通过版本",
+            )
         fp = fingerprint_for_task(task)
         active = self.active_job(fp["spec_key"])
         if active:
@@ -315,9 +404,10 @@ class WorkloadRecoveryService:
         current = now()
         try:
             self.db.execute(
-                "INSERT INTO workload_recovery_jobs(id, spec_key, task_id, workspace_task_id, status, phase, "
-                "created_at, updated_at) VALUES(?, ?, ?, ?, 'pending', 'creating_task', ?, ?)",
-                (job_id, fp["spec_key"], task_id, hidden_id, current, current),
+                "INSERT INTO workload_recovery_jobs(id, spec_key, task_id, workspace_task_id, base_attempt_id, "
+                "base_snapshot_id, status, phase, created_at, updated_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, 'pending', 'creating_task', ?, ?)",
+                (job_id, fp["spec_key"], task_id, hidden_id, base["id"], base.get("snapshot_id"), current, current),
             )
         except sqlite3.IntegrityError:
             active = self.active_job(fp["spec_key"])
@@ -326,10 +416,12 @@ class WorkloadRecoveryService:
             raise RecoveryError("RECOVERY_LOCKED", "同一题的逆向任务正在创建，请稍后重试")
         try:
             hidden = self.tasks.create_recovery_task(task_id, job_id)
+            self._seed_passing_base(hidden, base)
             workspace_task_id = hidden["id"]
             self.db.execute(
-                "UPDATE workload_recovery_jobs SET workspace_task_id=?, status='running', phase='starting_runner', updated_at=? WHERE id=?",
-                (workspace_task_id, now(), job_id),
+                "UPDATE workload_recovery_jobs SET workspace_task_id=?, base_attempt_id=?, base_snapshot_id=?, "
+                "status='running', phase='starting_runner', updated_at=? WHERE id=?",
+                (workspace_task_id, base["id"], base.get("snapshot_id"), now(), job_id),
             )
         except Exception as exc:
             self.db.execute(
@@ -393,6 +485,15 @@ class WorkloadRecoveryService:
         job = self.get_job(job_id)
         if job["status"] not in ("paused", "external_blocked", "partial"):
             raise RecoveryError("BAD_STATE", f"逆向任务当前为 {job['status']}，不能继续")
+        try:
+            source_pass = self.passing_attempt(job["task_id"])
+        except TaskError:
+            source_pass = None
+        if not job.get("base_attempt_id") or not source_pass:
+            raise RecoveryError(
+                "RECOVERY_REQUIRES_PASS_BASELINE",
+                "该逆向任务没有从 Pass 提交创建的基座；请先让优化任务产生 Pass，再重新探测",
+            )
         hidden_id = job["workspace_task_id"]
         self.tasks.reconcile_codex_runner(hidden_id)
         hidden = self.tasks.get(hidden_id)
@@ -434,7 +535,11 @@ class WorkloadRecoveryService:
         if hidden["status"] == "paused":
             return {"job_id": job_id, "status": "paused"}
         startup_extra = (
-            "首次启动顺序：先调用 read_problem(url) 阅读完整题面，再读取模板，之后才允许诊断提交。"
+            f"逆向基座：优化任务 Pass attempt {job.get('base_attempt_id') or 'unknown'} 的完整源码快照已复制到当前 workspace，"
+            "不要从空模板重新开始。\n"
+            "首次启动顺序：先调用 read_problem(url) 阅读完整题面，再读取当前 workspace 的模板/基座代码，"
+            "然后读取 .ascendforge/skills/oj-feedback-reverse-engineering/SKILL.md（按需读 references），"
+            "按照技能内的方法设计探针；之后才允许诊断提交。"
             "为节省 token，只写一个最小 specifications.json，不需要 evidence.md、长篇说明或证据文件。"
             "顶层必须写 confirmed:true 表示你已确认规格；宿主会记录来源任务和诊断提交。格式："
             '{"schema":"ascendforge-workload-spec/1","confirmed":true,"testcases":[{"testcase_id":"...",'
@@ -449,9 +554,10 @@ class WorkloadRecoveryService:
                 self.settings,
                 hidden_id,
                 mode="recovery",
-                skill_name="recover-operator-workload",
+                skill_name="oj-feedback-reverse-engineering",
                 startup_extra=startup_extra,
                 skip_preflight=True,
+                embed_skill=False,
                 timeout_sec=3600,
             )
         except Exception as exc:

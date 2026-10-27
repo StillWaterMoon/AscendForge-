@@ -12,6 +12,7 @@ database.  The worker is still the only sender of official submissions.
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -55,6 +56,8 @@ WORKSPACE_META_NAMES = {
     "specifications.json",
     "evidence.md",
 }
+RECOVERY_SKILL_NAME = "oj-feedback-reverse-engineering"
+RECOVERY_SKILL_DIR = Path(".ascendforge") / "skills" / RECOVERY_SKILL_NAME
 
 # 源码读取/编辑使用 Codex 自己的 workspace 文件能力，不再提供额外文件工具。
 CLI_TOOL_SPECS = [
@@ -123,6 +126,20 @@ def _services(settings: Settings) -> tuple[Database, TaskService, Scheduler, Wor
     return db, tasks, scheduler, worker
 
 
+def _is_workspace_meta(path: Path) -> bool:
+    return path.name in WORKSPACE_META_NAMES or ".ascendforge" in path.parts
+
+
+def _copy_recovery_skill(settings: Settings, workspace: Path) -> Path:
+    source = Path(settings.root) / "skills" / RECOVERY_SKILL_NAME
+    target = workspace / RECOVERY_SKILL_DIR
+    if target.exists():
+        shutil.rmtree(target)
+    if source.is_dir():
+        shutil.copytree(source, target)
+    return target
+
+
 def _merge_workspace_files(parent_files: dict[str, str], workspace_files: dict[str, str]) -> dict[str, str]:
     """Merge current workspace over parent, dropping files deleted from the workspace.
 
@@ -143,7 +160,7 @@ def _workspace_files(workspace: Path) -> dict[str, str]:
     for path in sorted(Path(workspace).rglob("*")):
         if not path.is_file():
             continue
-        if path.name in ("TASK.json", "AGENTS.md", "codex-tools.json"):
+        if _is_workspace_meta(path):
             continue
         files[str(path.relative_to(workspace)).replace("\\", "/")] = path.read_text(encoding="utf-8")
     return files
@@ -273,6 +290,7 @@ def run_codex_agent(
     skill_name: str | None = None,
     startup_extra: str = "",
     skip_preflight: bool = False,
+    embed_skill: bool = True,
 ) -> dict:
     """Tool-driven Codex session; no fixed round count.
 
@@ -401,7 +419,7 @@ def run_codex_agent(
     def collect_effective() -> tuple[dict[str, str], dict]:
         workspace_files = {}
         for path in sorted(workspace.rglob("*")):
-            if path.is_file() and path.name not in WORKSPACE_META_NAMES:
+            if path.is_file() and not _is_workspace_meta(path):
                 workspace_files[str(path.relative_to(workspace)).replace("\\", "/")] = path.read_text(
                     encoding="utf-8"
                 )
@@ -687,12 +705,27 @@ def run_codex_agent(
                 },
                 instructions="Use the provided dynamic tools; do not attempt to submit outside them.",
             )
-        # 首次启动注入真实 SKILL.md 和 TOOLS.md，而不是占位文本。
         injected_skill = skill_name or "start-operator-optimization"
         skill_path = Path(settings.root) / "skills" / injected_skill / "SKILL.md"
         tools_path = Path(settings.root) / "skills" / "start-operator-optimization" / "TOOLS.md"
-        skill_text = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "SKILL.md 未找到"
-        tools_text = tools_path.read_text(encoding="utf-8") if tools_path.is_file() else "TOOLS.md 未找到"
+        skill_target = None
+        if mode == "recovery":
+            skill_target = _copy_recovery_skill(settings, workspace)
+            # Copy the tool contract into the read-only recovery reference area
+            # instead of pasting it into every startup prompt.
+            if tools_path.is_file():
+                (workspace / ".ascendforge").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(tools_path, workspace / ".ascendforge" / "TOOLS.md")
+        if embed_skill:
+            skill_text = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "SKILL.md 未找到"
+            tools_text = tools_path.read_text(encoding="utf-8") if tools_path.is_file() else "TOOLS.md 未找到"
+        else:
+            skill_text = (
+                f"技能已复制到：{skill_target / 'SKILL.md' if skill_target else skill_path}\n"
+                "首次启动必须先完整读取该 SKILL.md，再按需读取同目录 references/；"
+                "不要只依赖启动消息里的摘要，也不要重新实现技能已经给出的方法。\n"
+            )
+            tools_text = "工具合同已复制到工作区 .ascendforge/TOOLS.md；首次启动先读取。\n"
         template = task.get("template") or {}
         template_files = [
             item for item in (template.get("files") or []) if isinstance(item, dict)
@@ -719,7 +752,9 @@ def run_codex_agent(
                 "禁止用 print/printf/stdout 做诊断；平台不会返回这些输出。"
                 "先建立 Pass 基线，再用 if/else 条件制造可控 Wrong Answer（例如某 dtype 直接不计算）。\n"
                 "AGENTS.md 允许通过 submit_official 提交诊断代码；禁止的是绕过宿主直接访问 CANNJudge。\n"
-                "在工作区写出 specifications.json 和 evidence.md；宿主会导入并校验。\n"
+                "工作区已复制完整的 oj-feedback-reverse-engineering 技能；先自行读取 SKILL.md，"
+                "按需读取 references，再按技能方法设计探针。模板代码也直接在当前 workspace 读取。\n"
+                "只写最小 specifications.json（confirmed:true），不需要 evidence.md 或长篇报告；宿主会导入并校验。\n"
                 "诊断提交只用于恢复规格；提交时会自动标记为 diagnostic，不会影响优化任务的 best。\n"
                 "诊断提交只保存在独立逆向任务中，不能出现在优化任务的尝试/提交列表里。\n"
             )
@@ -729,7 +764,8 @@ def run_codex_agent(
                 "根据真实结果决定修复、继续、回退或更换方向。\n"
             )
         startup = (
-            "下面是首次启动必须完整阅读的 skill 和工具合同。\n\n"
+            ("首次启动必须先读取工作区技能文件。" if not embed_skill else "下面是首次启动必须完整阅读的 skill 和工具合同。")
+            + "\n\n"
             "===== SKILL.md =====\n"
             + skill_text
             + "\n\n===== TOOLS.md =====\n"
@@ -772,9 +808,9 @@ def run_codex_agent(
                     "继续逆向评测数据。工作区 AGENTS.md 已更新：允许并应通过 submit_official "
                     "提交诊断代码获取官方证据，禁止的是绕过宿主直接访问 CANNJudge。"
                     "如果没有官方证据，不要因为缺少 submission_id 停止；先建立正确基线，再按 "
-                    "recover-operator-workload 技能 4.3 的错误比例通道做受控探针。"
-                    "检查工作区已有 specifications.json/evidence.md，继续补全未知项；"
-                    "只保存元信息和证据，不生成 tensor。"
+                    "oj-feedback-reverse-engineering 技能的方法设计受控 WA 探针。"
+                    "需要时参考工作区技能文件，检查已有 specifications.json；"
+                    "只保存元信息，不生成 tensor。"
                 )
             else:
                 resume_instruction = (

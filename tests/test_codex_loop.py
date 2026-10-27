@@ -174,16 +174,24 @@ class CodexLoopTests(unittest.TestCase):
                 task["id"],
                 timeout_sec=10,
                 mode="recovery",
-                skill_name="recover-operator-workload",
+                skill_name="oj-feedback-reverse-engineering",
                 skip_preflight=True,
+                embed_skill=False,
             )
         self.assertEqual(result["turns"], 1)
-        self.assertIn("恢复算子输入规格", adapter.prompts[0])
-        self.assertIn("第一步必须先调用 read_problem(url)", adapter.prompts[0])
-        self.assertIn("禁止用 print/printf/stdout 做诊断", adapter.prompts[0])
-        self.assertIn("不得生成或保存大规模 tensor", adapter.prompts[0])
-        self.assertIn("模板文件：kernel.asc", adapter.prompts[0])
-        self.assertIn("逆向评测数据", adapter.thread_name)
+        self.assertIn("oj-feedback-reverse-engineering", adapter.prompts[0])
+        self.assertIn("read_problem(url)", adapter.prompts[0])
+        self.assertIn("print/printf/stdout", adapter.prompts[0])
+        self.assertIn("specifications.json", adapter.prompts[0])
+        self.assertIn("kernel.asc", adapter.prompts[0])
+        self.assertNotIn("SKILL.md 未找到", adapter.prompts[0])
+        self.assertNotIn("## 目的与工作方式", adapter.prompts[0])
+        self.assertTrue(adapter.thread_name.endswith("逆向评测数据"))
+        workspace = env.settings.data_dir / "cli_workspaces" / task["id"] / "workspace"
+        self.assertTrue(
+            (workspace / ".ascendforge" / "skills" / "oj-feedback-reverse-engineering" / "SKILL.md").is_file()
+        )
+        self.assertTrue((workspace / ".ascendforge" / "TOOLS.md").is_file())
         self.assertEqual(env.tasks.get(task["id"])["status"], "paused")
 
     def test_codex_agent_sends_placeholder_skill_and_pauses_on_api_error(self):

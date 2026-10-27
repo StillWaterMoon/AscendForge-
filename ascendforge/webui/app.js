@@ -646,7 +646,7 @@ async function renderTask(taskId) {
             ? '<button class="btn btn-primary" data-pause-task="1" type="button">暂停任务</button>'
             : '<button class="btn btn-primary" data-continue-task="1" type="button">继续任务</button>';
         })()}
-        <button class="btn" data-workload-recovery="1" type="button">逆向评测数据</button>
+        <button class="btn" data-workload-recovery="1" type="button" ${task.workload_recovery?.requires_pass_baseline ? 'disabled title="需要优化任务先产生一个 Pass 提交"' : ''}>逆向评测数据</button>
       </div>
     </div>
 
@@ -838,10 +838,11 @@ function renderWorkloadRecovery(task) {
     </div>
     ${job ? `<div class="alert ${job.status === 'failed' ? 'error' : job.status === 'external_blocked' ? 'warn' : 'info'}" style="margin-bottom:12px">
       <div class="row-between"><strong>逆向任务 ${esc(job.id)}</strong><span class="mono small">${esc(job.phase || '')}</span></div>
+      ${job.base_attempt_id ? `<div class="small mono" style="margin-top:4px">基座：Pass attempt ${esc(job.base_attempt_id)}</div>` : ''}
       ${job.error_message ? `<div class="small" style="margin-top:6px">${esc(job.error_code || '')} · ${esc(job.error_message)}</div>` : ''}
       <div class="row" style="margin-top:8px">
         ${['pending', 'running', 'external_blocked'].includes(job.status) ? `<button class="btn btn-sm" data-recovery-action="pause" data-recovery-job="${esc(job.id)}" type="button">暂停逆向</button>` : ''}
-        ${['paused', 'external_blocked', 'partial'].includes(job.status) ? `<button class="btn btn-sm btn-primary" data-recovery-action="resume" data-recovery-job="${esc(job.id)}" type="button">继续逆向</button>` : ''}
+        ${['paused', 'external_blocked', 'partial'].includes(job.status) && !rec.requires_pass_baseline ? `<button class="btn btn-sm btn-primary" data-recovery-action="resume" data-recovery-job="${esc(job.id)}" type="button">继续逆向</button>` : ''}
         ${['pending', 'running', 'paused', 'external_blocked', 'partial'].includes(job.status) ? `<button class="btn btn-sm btn-danger" data-recovery-action="stop" data-recovery-job="${esc(job.id)}" type="button">停止逆向</button>` : ''}
       </div>
     </div>` : ''}
@@ -862,6 +863,7 @@ function renderWorkloadRecovery(task) {
     </table></div>
     <div class="small faint" style="margin-top:10px">
       记录来源：${esc(spec.source_task_id || '—')} · 更新于 ${esc(fmtTime(spec.updated_at))}
+      ${rec.base_attempt_id && !job ? ` · 基座 ${esc(rec.base_attempt_id)}` : ''}
       · 已确认测试点 ${esc(cases.filter((item) => ['measured', 'confirmed'].includes(item.evidence_status)).length)}/${esc(cases.length)}
       · 未知/推断 ${esc(spec.unknown_count ?? 0)}
       ${rec.diagnostics ? ` · 诊断提交 ${esc(rec.diagnostics)}` : ''}
@@ -881,8 +883,8 @@ function renderWorkloadRecovery(task) {
     </details>` : ''}
     ${warnings.length ? `<div class="alert warn small" style="margin-top:10px">${warnings.slice(0, 8).map(esc).join('<br>')}</div>` : ''}
     <div class="row" style="margin-top:10px">
-      ${!job || !['pending', 'running', 'paused', 'external_blocked'].includes(job.status) ? `<button class="btn btn-sm" data-recovery-reprobe="1" type="button">重新验证/重新探测</button>` : ''}
-    </div>` : `<div class="empty">还没有可复用的输入规格。点击右上角“逆向评测数据”启动独立 Codex 逆向会话。</div>`}
+      ${(!job || !['pending', 'running', 'paused', 'external_blocked'].includes(job.status)) && !rec.requires_pass_baseline ? `<button class="btn btn-sm" data-recovery-reprobe="1" type="button">重新验证/重新探测</button>` : ''}
+    </div>` : `<div class="empty">${rec.requires_pass_baseline ? '逆向评测需要优化任务先产生一个 Pass 提交。' : '还没有可复用的输入规格。点击右上角“逆向评测数据”启动独立 Codex 逆向会话。'}</div>`}
   </div>`;
 }
 

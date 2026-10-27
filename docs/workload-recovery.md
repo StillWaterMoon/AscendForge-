@@ -2,22 +2,25 @@
 
 ## 目标与边界
 
-从题面、模板、已有日志和允许的官方诊断反馈恢复**输入规格**：
+从题面、Pass 基线、模板、已有日志和允许的官方诊断反馈恢复**输入规格**：
 
 - dtype、rank、shape、axis、属性、元素数
-- 每个测试点的证据状态与证据引用
+- 每个测试点 Codex 确认的状态
 
 不恢复原始 tensor 数值，不生成大规模 tensor，不执行数据生成器，不做性能刷分。
 诊断被平台明确拒绝时记录原因，不通过换编码绕过。
 
+逆向必须以优化任务真实产生的 **Pass 提交**为基座；没有 Pass 时不允许启动。
+
 ## 任务卡流程
 
-1. 打开优化任务详情，点击 **逆向评测数据**。
-2. 后端先按指纹查缓存：
+1. 先让优化任务实际跑出一个 **Pass 提交**。没有 Pass 时“逆向评测数据”按钮禁用，后端也会拒绝启动。
+2. 打开优化任务详情，点击 **逆向评测数据**。
+3. 后端先按指纹查缓存：
    - `verified`：直接展示，不新建会话、不提交。
    - 已有运行中/暂停中的逆向任务：关联并展示进度。
    - 只有 `partial`：展示已有结果；再次点击或“重新验证/重新探测”启动新 revision。
-3. 没有记录时创建独立逆向任务和 Codex thread。
+4. 没有记录时创建独立逆向任务和 Codex thread，并把最新 Pass 提交的快照复制为隐藏任务的基座。
 
 ## 指纹与缓存
 
@@ -42,18 +45,22 @@ data/cli_workspaces/<recovery_task_id>/workspace
 Codex thread: <题目>逆向评测数据
 ```
 
-它与优化任务的 workspace、attempt、best 完全分开。题目模板会原样复制到逆向 workspace，并与正常任务一样在提交时和源码修改一起进入快照；`specifications.json`、`evidence.md` 等恢复产物只作为工作区证据，不会被当作源码提交。
+它与优化任务的 workspace、attempt、best 完全分开。创建时读取优化任务的 Pass 提交快照，在隐藏任务中生成一个只读基座 attempt，再从该快照初始化逆向 workspace；不是从空模板重新开始。
+
+`specifications.json`、`.ascendforge/skills/`、`evidence.md` 等恢复产物不会作为源码提交。
 
 诊断提交通过同一个 Scheduler，因此共享官方账号的冷却、每日额度、在途限制和 unknown 对账；提交 attempts 标记 `diagnostic=1`，不会更新优化任务的 best。
 
 ## Skill
 
-启动时注入：
+启动时不整份注入 skill。完整技能目录会复制到：
 
 ```text
-skills/recover-operator-workload/SKILL.md
-skills/start-operator-optimization/TOOLS.md
+<workspace>/.ascendforge/skills/oj-feedback-reverse-engineering/
+<workspace>/.ascendforge/TOOLS.md
 ```
+
+启动消息只给路径，并要求 Codex 自己读取 `SKILL.md`、按需读取 `references/`；模板代码直接从 workspace 读取。
 
 Codex 只使用：
 

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS workload_recovery_jobs (
     spec_key TEXT NOT NULL,
     task_id TEXT NOT NULL,
     workspace_task_id TEXT NOT NULL,
+    base_attempt_id TEXT,
+    base_snapshot_id TEXT,
     status TEXT NOT NULL,
     phase TEXT,
     progress_json TEXT,
@@ -411,6 +413,10 @@ class Database:
                 "diff_sha": "TEXT",
                 "edit_mode": "TEXT",
                 "changed_files_json": "TEXT",
+            },
+            "workload_recovery_jobs": {
+                "base_attempt_id": "TEXT",
+                "base_snapshot_id": "TEXT",
             },
             "submissions": {
                 "diagnostic": "INTEGER NOT NULL DEFAULT 0",

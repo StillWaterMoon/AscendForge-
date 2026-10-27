@@ -1,0 +1,17 @@
+[
+  {"point": 1, "round1": "45.09", "round2": "0.99", "round3": "49.55"},
+  {"point": 2, "round1": "65.23", "round2": "3.03", "round3": "51.66"},
+  {"point": 3, "round1": "85.97", "round2": "4.00", "round3": "49.50"},
+  {"point": 4, "round1": "26.92", "round2": "10.00", "round3": "49.56"},
+  {"point": 5, "round1": "10.37", "round2": "50.65", "round3": "25.11"},
+  {"point": 6, "round1": "46.44", "round2": "52.62", "round3": "24.78"},
+  {"point": 7, "round1": "65.03", "round2": "60.00", "round3": "24.99"},
+  {"point": 8, "round1": "85.00", "round2": "70.00", "round3": "25.00"},
+  {"point": 9, "round1": "28.04", "round2": "91.94", "round3": "24.98"},
+  {"point": 10, "round1": "5.03", "round2": "80.00", "round3": "58.34"},
+  {"point": 11, "round1": "45.00", "round2": "50.00", "round3": "70.79"},
+  {"point": 12, "round1": "67.16", "round2": "67.77", "round3": "77.49"},
+  {"point": 13, "round1": "85.03", "round2": "50.00", "round3": "84.52"},
+  {"point": 14, "round1": "29.32", "round2": "85.54", "round3": "86.60"},
+  {"point": 15, "round1": "14.97", "round2": "99.99", "round3": "88.19"}
+]
