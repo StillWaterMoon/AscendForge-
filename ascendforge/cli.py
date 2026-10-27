@@ -220,6 +220,32 @@ def cmd_codex_run(args) -> int:
     return 0 if result.exit_code == 0 and not result.timed_out else 2
 
 
+def cmd_remote_bridge(args) -> int:
+    import logging
+    import os
+
+    from .db import Database
+    from .remote import RemoteBridge
+    from .security import SecretBox, load_master_key
+
+    settings = _settings(args)
+    db = Database(settings.db_path)
+    db.init()
+    box = SecretBox(load_master_key(settings.key_file, os.environ.get("ASCENDFORGE_SECRET_KEY", "")))
+    bridge = RemoteBridge(settings, db, box)
+    logging.basicConfig(level=logging.INFO)
+    try:
+        bridge.serve_forever()
+    except Exception as exc:
+        logging.getLogger(__name__).exception("remote bridge stopped")
+        try:
+            bridge.store.set_status(status="error", last_error=str(exc)[:1000], updated_at=None)
+        except Exception:
+            pass
+        return 1
+    return 0
+
+
 def cmd_codex_loop(args) -> int:
     from .codex_loop import run_codex_agent
 
@@ -374,6 +400,9 @@ def build_parser() -> argparse.ArgumentParser:
     recovery_run = sub.add_parser("recovery-run", help=argparse.SUPPRESS)
     recovery_run.add_argument("--job", required=True)
     recovery_run.set_defaults(func=cmd_recovery_run)
+
+    remote_bridge = sub.add_parser("remote-bridge", help=argparse.SUPPRESS)
+    remote_bridge.set_defaults(func=cmd_remote_bridge)
 
     user = sub.add_parser("user", help="用户管理")
     user_sub = user.add_subparsers(dest="user_action", required=True)

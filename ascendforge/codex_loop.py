@@ -33,6 +33,7 @@ from .experiments import (
 )
 from .platform.cannjudge import CannjudgeAdapter
 from .platform.service import PlatformService
+from .remote import RemoteBridgeClient, RemoteError
 from .scheduler import Scheduler
 from .security import CredentialStore, SecretBox, load_master_key
 from .tasks import TaskService
@@ -112,6 +113,27 @@ CLI_TOOL_SPECS = [
         },
     },
 ]
+
+# This is an execution channel, not a fourth official-platform tool. It is
+# registered only while the operator has an active remote SSH bridge.
+REMOTE_TOOL_SPEC = {
+    "type": "function",
+    "name": "remote_exec",
+    "description": (
+        "Sync the current workspace to the connected remote server and execute a shell "
+        "command there. Use it for remote compilation, NPU tests and server-side inspection. "
+        "The host owns SSH credentials; output is returned as exit_code/stdout/stderr."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "minLength": 1, "maxLength": 20000},
+            "timeout": {"type": "integer", "minimum": 1, "maximum": 3600},
+        },
+        "required": ["command"],
+        "additionalProperties": False,
+    },
+}
 
 
 def _services(settings: Settings) -> tuple[Database, TaskService, Scheduler, Worker]:
@@ -663,6 +685,22 @@ def run_codex_agent(
                 "remote_id": row.get("remote_id"),
                 "result": normalized,
             }
+        if tool == "remote_exec":
+            if not RemoteBridgeClient.available(db):
+                raise ValueError("remote server is not connected")
+            command = str(arguments.get("command") or "").strip()
+            if not command:
+                raise ValueError("command is required")
+            try:
+                timeout = int(arguments.get("timeout") or 600)
+            except (TypeError, ValueError):
+                timeout = 600
+            try:
+                return RemoteBridgeClient(db).exec_workspace(
+                    workspace, task_id, command, timeout=max(1, min(timeout, 3600))
+                )
+            except RemoteError as exc:
+                raise ValueError(str(exc)) from exc
         if tool == "query_submission":
             submission_id = arguments.get("submission_id") or state["last_submission_id"]
             if not submission_id:
@@ -685,11 +723,12 @@ def run_codex_agent(
         thread_name = _codex_thread_name(task)
         if mode == "recovery":
             thread_name = f"{task.get('problem_title') or task.get('title') or task_id}逆向评测数据"
+        remote_active = RemoteBridgeClient.available(db)
         adapter = AppServerAdapter(
             timeout_sec=timeout_sec,
             on_event=on_event,
             on_tool_call=tool_handler,
-            tools=CLI_TOOL_SPECS,
+            tools=CLI_TOOL_SPECS + ([REMOTE_TOOL_SPEC] if remote_active else []),
             thread_name=thread_name,
         )
         if not workspace.exists():
@@ -777,10 +816,16 @@ def run_codex_agent(
             + f"允许提交文件：{', '.join(editable_files) if editable_files else '由 Codex 按题面创建；根目录 .asc/.h'}\n"
             + f"只读文件：{', '.join(readonly_files) if readonly_files else '无额外只读文件'}\n"
             + f"评分指标：{config.get('metric') or 'auto'}；目标：{config.get('target_score')}\n"
-            + "可用工具只有三个：\n"
+            + "平台工具只有三个：\n"
             + "1. read_problem(url)：读取完整题面；\n"
             + "2. submit_official(request_id?, hypothesis?)：保存当前 workspace 快照并排队官方提交，立即返回 submission_id；\n"
             + "3. read_official_evaluation(submission_id)：查询提交状态、编译错误、测试点、耗时和分数。\n"
+            + (
+                "另有远程执行通道 remote_exec(command, timeout?)：先同步当前 workspace，再在已连接的远程服务器执行 shell，"
+                "返回 exit_code/stdout/stderr。远程编译、NPU 测试和服务器代码检查都应使用它。\n"
+                if remote_active
+                else ""
+            )
             + "源码请直接用你自己的文件工具在 workspace 内读取和修改；不要等待用户逐步指挥。\n"
             + "只修改可编辑文件：kernel.asc 和根目录 .asc/.h；不要修改 main.asc、CMakeLists.txt、run.sh、sample.py、reference.py。\n"
             + "不要设置累计轮数、token/费用/时长预算；由用户手动暂停或停止。\n"

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -151,6 +151,24 @@ CREATE INDEX IF NOT EXISTS idx_recovery_jobs_key ON workload_recovery_jobs(spec_
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recovery_jobs_active
     ON workload_recovery_jobs(spec_key)
     WHERE status IN ('pending', 'running', 'paused', 'external_blocked');
+
+CREATE TABLE IF NOT EXISTS remote_servers (
+    id TEXT PRIMARY KEY,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    username TEXT NOT NULL,
+    auth_type TEXT NOT NULL DEFAULT 'key',
+    key_path TEXT,
+    remote_root TEXT NOT NULL DEFAULT '/tmp/ascendforge',
+    status TEXT NOT NULL DEFAULT 'disconnected',
+    bridge_port INTEGER,
+    bridge_token TEXT,
+    pid INTEGER,
+    last_error TEXT,
+    last_seen REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS experiments (
     id TEXT PRIMARY KEY,

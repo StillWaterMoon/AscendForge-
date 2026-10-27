@@ -20,6 +20,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 import zipfile
 from dataclasses import dataclass
@@ -60,6 +61,7 @@ from .security import (
     setup_token_valid,
     verify_password,
 )
+from .remote import RemoteError, RemoteStore, start_bridge_process, stop_bridge_process
 from .tasks import TaskError, TaskService
 from .util import canonical_json, json_dumps, json_loads, new_id, now, truncate_text
 from .workload_recovery import RecoveryError, WorkloadRecoveryService
@@ -109,6 +111,7 @@ class App:
         self.tasks = TaskService(self.db, settings, self.platform)
         self.scheduler = Scheduler(self.db, settings, self.platform, self.tasks)
         self.recovery = WorkloadRecoveryService(self.db, settings, self.tasks, self.scheduler)
+        self.remote = RemoteStore(self.db, self.box)
         self.throttle = LoginThrottle()
         self.idem_lock = threading.Lock()
         self.setup_token = settings.setup_token
@@ -223,6 +226,10 @@ class App:
             ("POST", r"^/api/platform/import-session$", "h_platform_import", False, False),
             ("POST", r"^/api/platform/test$", "h_platform_test", False, False),
             ("POST", r"^/api/platform/disconnect$", "h_platform_disconnect", False, False),
+            ("GET", r"^/api/remote/status$", "h_remote_status", False, True),
+            ("POST", r"^/api/remote/test$", "h_remote_test", False, False),
+            ("POST", r"^/api/remote/connect$", "h_remote_connect", False, False),
+            ("POST", r"^/api/remote/disconnect$", "h_remote_disconnect", False, False),
             ("GET", r"^/api/capabilities$", "h_capabilities", False, True),
             ("GET", r"^/api/worker$", "h_worker", False, True),
         ]
@@ -1201,6 +1208,77 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_platform_disconnect(self, **_: Any):
         return 200, {"platform": self.app.platform.disconnect()}
+
+    # ==================================================================
+    # Remote execution bridge
+    # ==================================================================
+    def h_remote_status(self, **_: Any):
+        return 200, {"remote": self.app.remote.public()}
+
+    def h_remote_test(self, **_: Any):
+        body = self._read_json()
+        previous = self.app.remote.get()
+        if previous:
+            stop_bridge_process(previous.get("pid"))
+        try:
+            self.app.remote.save(body)
+            client = self.app.remote.connect_client()
+            try:
+                client.exec_command("true", timeout=10)[1].channel.recv_exit_status()
+            finally:
+                client.close()
+        except RemoteError as exc:
+            raise ApiError(400, "REMOTE_CONNECT_FAILED", str(exc)) from None
+        except Exception as exc:
+            raise ApiError(502, "REMOTE_CONNECT_FAILED", f"SSH 连接失败：{exc}") from None
+        return 200, {"remote": self.app.remote.public(), "tested": True}
+
+    def h_remote_connect(self, **_: Any):
+        body = self._read_json()
+        previous = self.app.remote.get()
+        if previous:
+            stop_bridge_process(previous.get("pid"))
+        try:
+            self.app.remote.save(body)
+        except RemoteError as exc:
+            raise ApiError(400, "REMOTE_CONFIG_INVALID", str(exc)) from None
+        try:
+            self.app.remote.set_status(
+                status="connecting", pid=None, bridge_port=None, bridge_token=None, last_error=None
+            )
+            process = start_bridge_process(self.app.settings)
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline:
+                time.sleep(0.25)
+                row = self.app.remote.get()
+                if row and row["status"] in ("connected", "error"):
+                    break
+                if process.poll() is not None:
+                    break
+        except Exception as exc:
+            stop_bridge_process(process.pid if "process" in locals() else None)
+            self.app.remote.set_status(status="error", last_error=str(exc)[:1000])
+            raise ApiError(502, "REMOTE_CONNECT_FAILED", f"无法启动 SSH 桥：{exc}") from None
+        row = self.app.remote.get()
+        if not row or row["status"] != "connected":
+            stop_bridge_process(process.pid)
+            message = (row or {}).get("last_error") or "SSH 桥未在限定时间内连接"
+            self.app.remote.set_status(status="error", last_error=message)
+            raise ApiError(502, "REMOTE_CONNECT_FAILED", message)
+        return 200, {"remote": self.app.remote.public()}
+
+    def h_remote_disconnect(self, **_: Any):
+        row = self.app.remote.get()
+        if row:
+            stop_bridge_process(row.get("pid"))
+            self.app.remote.set_status(
+                status="disconnected",
+                pid=None,
+                bridge_port=None,
+                bridge_token=None,
+                last_error=None,
+            )
+        return 200, {"remote": self.app.remote.public()}
 
     # ==================================================================
     # Capabilities / skills / worker

@@ -165,6 +165,19 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["task"]["status"], "running")
 
+    def test_02b_remote_status_and_invalid_config(self):
+        status, payload = self.client.request("GET", "/api/remote/status")
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["remote"]["configured"])
+        status, payload = self.client.request(
+            "POST",
+            "/api/remote/test",
+            {"host": "", "username": "", "auth_type": "key", "remote_root": "/tmp/ascendforge"},
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "REMOTE_CONNECT_FAILED")
+
     def test_04b_project_template_upload_and_create(self):
         fake = FakePlatform()
         self.app.platform.resolve_and_download = lambda url, task_dir: fake.resolve_and_download(url, task_dir)

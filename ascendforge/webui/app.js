@@ -10,6 +10,8 @@ const state = {
   csrf: null,
   timer: null,
   workerTimer: null,
+  remoteTimer: null,
+  remote: null,
   route: '',
   taskId: null,
   taskTab: 'attempts',
@@ -230,11 +232,14 @@ async function showShell() {
   $('#topbar').hidden = false;
   $('#current-user').textContent = state.me ? state.me.username : '';
   await refreshWorkerPill();
+  await refreshServerPill();
 }
 
 function startWorkerPolling() {
   clearInterval(state.workerTimer);
   state.workerTimer = setInterval(refreshWorkerPill, 15000);
+  clearInterval(state.remoteTimer);
+  state.remoteTimer = setInterval(refreshServerPill, 10000);
 }
 
 async function refreshWorkerPill() {
@@ -246,6 +251,88 @@ async function refreshWorkerPill() {
     pill.className = `worker-pill ${w.alive ? 'alive' : 'dead'}`;
     pill.title = w.alive ? `心跳 ${w.age_sec}s 前` : '后台 worker 未运行，任务不会推进';
   } catch (_) { /* non-critical */ }
+}
+
+async function refreshServerPill() {
+  try {
+    const data = await api('/api/remote/status');
+    const remote = data.remote || {};
+    state.remote = remote;
+    const pill = $('#server-pill');
+    if (!pill) return;
+    const connected = remote.status === 'connected';
+    pill.textContent = connected ? '已连接' : remote.status === 'connecting' ? '连接中' : '未连接';
+    pill.className = `server-pill ${connected ? 'connected' : remote.status === 'connecting' ? 'connecting' : remote.status === 'error' ? 'error' : ''}`;
+  } catch (_) { /* non-critical */ }
+}
+
+function remoteFormValue(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+function openServerModal() {
+  const remote = state.remote || {};
+  const auth = remote.auth_type || 'key';
+  openModal('远程服务器', `
+    <div class="small faint" style="margin-bottom:12px">SSH 连接由宿主进程持有；Codex 只获得 remote_exec 通道，不会看到 SSH 密码。</div>
+    <form id="server-form" class="stack">
+      <div class="grid-2">
+        <div class="field"><label for="server-host">主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="10.0.0.12" required></div>
+        <div class="field"><label for="server-port">SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
+      </div>
+      <div class="field"><label for="server-user">用户名</label><input id="server-user" value="${esc(remote.username || '')}" required></div>
+      <div class="field"><label for="server-auth">认证方式</label>
+        <select id="server-auth"><option value="key" ${auth === 'key' ? 'selected' : ''}>SSH key / agent</option><option value="password" ${auth === 'password' ? 'selected' : ''}>密码</option></select>
+      </div>
+      <div class="field"><label for="server-key">私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
+      <div class="field"><label for="server-password">SSH 密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
+      <div class="field"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/tmp/ascendforge')}" required></div>
+      <div id="server-error"></div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn" type="button" data-server-action="test">测试连接</button>
+        <button class="btn btn-primary" type="button" data-server-action="connect">${remote.status === 'connected' ? '重新连接' : '连接'}</button>
+        ${remote.status === 'connected' ? '<button class="btn btn-danger" type="button" data-server-action="disconnect">断开</button>' : ''}
+      </div>
+    </form>
+  `);
+  $$('[data-server-action]').forEach((button) => {
+    button.addEventListener('click', () => serverAction(button.dataset.serverAction));
+  });
+}
+
+async function serverAction(action) {
+  const errorBox = $('#server-error');
+  if (errorBox) errorBox.innerHTML = '';
+  if (action === 'disconnect') {
+    try {
+      await api('/api/remote/disconnect', { method: 'POST', body: {} });
+      toast('远程服务器已断开', 'success');
+      await refreshServerPill();
+      openServerModal();
+    } catch (err) {
+      toast(err.message || '断开失败', 'error');
+    }
+    return;
+  }
+  const body = {
+    host: remoteFormValue('server-host'),
+    port: Number(remoteFormValue('server-port') || 22),
+    username: remoteFormValue('server-user'),
+    auth_type: remoteFormValue('server-auth') || 'key',
+    key_path: remoteFormValue('server-key'),
+    password: document.getElementById('server-password')?.value || '',
+    remote_root: remoteFormValue('server-root') || '/tmp/ascendforge',
+  };
+  const path = action === 'test' ? '/api/remote/test' : '/api/remote/connect';
+  try {
+    await api(path, { method: 'POST', body });
+    toast(action === 'test' ? 'SSH 连接测试通过' : '远程服务器已连接', 'success');
+    await refreshServerPill();
+    openServerModal();
+  } catch (err) {
+    if (errorBox) errorBox.innerHTML = `<div class="alert error">${esc(err.message || '连接失败')}</div>`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1279,10 +1366,12 @@ async function renderConnections() {
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch (_) { /* ignore */ }
   state.me = null; state.csrf = null;
-  clearInterval(state.workerTimer); clearInterval(state.timer);
+  clearInterval(state.workerTimer); clearInterval(state.remoteTimer); clearInterval(state.timer);
   renderLogin();
 });
 
-window.addEventListener('beforeunload', () => { clearInterval(state.timer); clearInterval(state.workerTimer); });
+$('#server-btn').addEventListener('click', openServerModal);
+
+window.addEventListener('beforeunload', () => { clearInterval(state.timer); clearInterval(state.workerTimer); clearInterval(state.remoteTimer); });
 
 boot();
