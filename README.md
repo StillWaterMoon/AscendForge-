@@ -131,7 +131,7 @@ CLI 启动时注入：
 - MCP：任务级 `python -m ascendforge.mcp.server --task-id ... --workspace ...` 提供 `read_problem`、`read_server_evaluation`、`read_official_evaluation`、`submit_server_test`、`submit_official` 五个工具；快照哈希、请求 ID 幂等、官方限频和服务器/官方结果分离见 [MCP 工具](docs/mcp-tools.md)
 - 项目模板：新建任务可上传 ZIP；上传后 Codex 从该工程开始，不上传则是空项目、从 0 开始；ZIP 会做路径穿越、文件数、大小和 UTF-8 文本校验，细节见 [项目模板上传](docs/project-template.md)
 - 执行模式：只保留本地 CLI（Codex）；创建后自动建会话并注入真实 skill 与工具合同，会话名按“题目名+算子优化”生成（如 `AddN算子优化`）。配置保留 `cli_backend` 字段，DeepSeek Harness / Claude Code 以后接入
-- 远程服务器通道：顶部“服务器”按钮通过 SSH 启动常驻 `remote-bridge`；连接后 Codex 获得 `remote_exec`，自动同步本地 workspace 并在远端编译/测试。远端不需要 Codex，详见 [远程服务器通道](docs/remote-server.md)
+- 远程服务器通道：**连接与设置**里的“远程服务器”卡片通过 SSH 启动常驻 `remote-bridge`；连接后 Codex 获得 `remote_exec`，自动同步本地 workspace 并在远端编译/测试。远端不需要 Codex，详见 [远程服务器通道](docs/remote-server.md)
 - 任务管理：停止/暂停的任务可在任务卡片点“删除”，级联删除 attempts、快照、提交、事件、workspace、日志以及该任务的隐藏逆向任务；running 或存在未知/发送中提交时拒绝删除，审计日志保留
 - 逆向评测数据：必须先有优化任务的 **Pass 提交**；按钮按题目/版本/测试集指纹复用规格，无缓存时从 Pass 快照创建独立 Codex 逆向 thread/workspace。完整 `oj-feedback-reverse-engineering` skill 复制到 `.ascendforge/skills/`，Codex 自行读取；诊断提交共享 Scheduler 但不影响优化 best；只导入最小 `specifications.json`，不生成 tensor。详见 [逆向评测数据](docs/workload-recovery.md)
 - Codex 执行边界：暂停会停止 Codex runner 进程树并释放 thread writer，但保留 session_ref 和 workspace；继续时新进程 resume 原 thread。提交限频、额度、在途、幂等和 unknown 对账仍由宿主强制执行

@@ -10,7 +10,6 @@ const state = {
   csrf: null,
   timer: null,
   workerTimer: null,
-  remoteTimer: null,
   remote: null,
   route: '',
   taskId: null,
@@ -232,14 +231,11 @@ async function showShell() {
   $('#topbar').hidden = false;
   $('#current-user').textContent = state.me ? state.me.username : '';
   await refreshWorkerPill();
-  await refreshServerPill();
 }
 
 function startWorkerPolling() {
   clearInterval(state.workerTimer);
   state.workerTimer = setInterval(refreshWorkerPill, 15000);
-  clearInterval(state.remoteTimer);
-  state.remoteTimer = setInterval(refreshServerPill, 10000);
 }
 
 async function refreshWorkerPill() {
@@ -253,63 +249,19 @@ async function refreshWorkerPill() {
   } catch (_) { /* non-critical */ }
 }
 
-async function refreshServerPill() {
-  try {
-    const data = await api('/api/remote/status');
-    const remote = data.remote || {};
-    state.remote = remote;
-    const pill = $('#server-pill');
-    if (!pill) return;
-    const connected = remote.status === 'connected';
-    pill.textContent = connected ? '已连接' : remote.status === 'connecting' ? '连接中' : '未连接';
-    pill.className = `server-pill ${connected ? 'connected' : remote.status === 'connecting' ? 'connecting' : remote.status === 'error' ? 'error' : ''}`;
-  } catch (_) { /* non-critical */ }
-}
-
 function remoteFormValue(id) {
   const el = document.getElementById(id);
   return el ? el.value.trim() : '';
 }
 
-function openServerModal() {
-  const remote = state.remote || {};
-  const auth = remote.auth_type || 'key';
-  openModal('远程服务器', `
-    <div class="small faint" style="margin-bottom:12px">SSH 连接由宿主进程持有；Codex 只获得 remote_exec 通道，不会看到 SSH 密码。</div>
-    <form id="server-form" class="stack">
-      <div class="grid-2">
-        <div class="field"><label for="server-host">主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="10.0.0.12" required></div>
-        <div class="field"><label for="server-port">SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
-      </div>
-      <div class="field"><label for="server-user">用户名</label><input id="server-user" value="${esc(remote.username || '')}" required></div>
-      <div class="field"><label for="server-auth">认证方式</label>
-        <select id="server-auth"><option value="key" ${auth === 'key' ? 'selected' : ''}>SSH key / agent</option><option value="password" ${auth === 'password' ? 'selected' : ''}>密码</option></select>
-      </div>
-      <div class="field"><label for="server-key">私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
-      <div class="field"><label for="server-password">SSH 密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
-      <div class="field"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/tmp/ascendforge')}" required></div>
-      <div id="server-error"></div>
-      <div class="row" style="justify-content:flex-end">
-        <button class="btn" type="button" data-server-action="test">测试连接</button>
-        <button class="btn btn-primary" type="button" data-server-action="connect">${remote.status === 'connected' ? '重新连接' : '连接'}</button>
-        ${remote.status === 'connected' ? '<button class="btn btn-danger" type="button" data-server-action="disconnect">断开</button>' : ''}
-      </div>
-    </form>
-  `);
-  $$('[data-server-action]').forEach((button) => {
-    button.addEventListener('click', () => serverAction(button.dataset.serverAction));
-  });
-}
-
-async function serverAction(action) {
+async function serverAction(action, onSuccess) {
   const errorBox = $('#server-error');
   if (errorBox) errorBox.innerHTML = '';
   if (action === 'disconnect') {
     try {
       await api('/api/remote/disconnect', { method: 'POST', body: {} });
       toast('远程服务器已断开', 'success');
-      await refreshServerPill();
-      openServerModal();
+      if (onSuccess) await onSuccess();
     } catch (err) {
       toast(err.message || '断开失败', 'error');
     }
@@ -328,8 +280,7 @@ async function serverAction(action) {
   try {
     await api(path, { method: 'POST', body });
     toast(action === 'test' ? 'SSH 连接测试通过' : '远程服务器已连接', 'success');
-    await refreshServerPill();
-    openServerModal();
+    if (onSuccess) await onSuccess();
   } catch (err) {
     if (errorBox) errorBox.innerHTML = `<div class="alert error">${esc(err.message || '连接失败')}</div>`;
   }
@@ -1240,12 +1191,15 @@ function openResolveModal(taskId, submissionId) {
 /* ------------------------------------------------------------------ */
 async function renderConnections() {
   setPoll(null);
-  const [data, platformData] = await Promise.all([
+  const [data, platformData, remoteData] = await Promise.all([
     api('/api/capabilities'),
     api('/api/platform/status'),
+    api('/api/remote/status'),
   ]);
   const platform = platformData.platform || {};
+  const remote = remoteData.remote || {};
   state.platform = platform;
+  state.remote = remote;
   state.capabilities = data.capabilities || data;
   const caps = state.capabilities || {};
   $('#view').innerHTML = `
@@ -1281,6 +1235,32 @@ async function renderConnections() {
           <div class="form-actions"><button class="btn btn-primary" type="submit">登录并验证</button></div>
         </form>
       `}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><div><h2>远程服务器</h2><div class="card-sub">Codex 仍在本机运行；这里提供 SSH 通道，让 Codex 在远端编译和测试。远端不需要安装 Codex。</div></div>
+        ${remote.status === 'connected' ? badge('已连接', 'completed') : remote.status === 'connecting' ? badge('连接中', 'pending') : remote.status === 'error' ? badge('连接失败', 'failed') : badge('未连接', 'pending')}</div>
+      ${remote.last_error ? `<div class="alert error small" style="margin-bottom:12px">${esc(remote.last_error)}</div>` : ''}
+      <form id="server-form" class="stack">
+        <div class="form-grid">
+          <div class="field"><label for="server-host">主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="192.0.2.10" required></div>
+          <div class="field"><label for="server-port">SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
+          <div class="field"><label for="server-user">用户名</label><input id="server-user" value="${esc(remote.username || '')}" required></div>
+          <div class="field"><label for="server-auth">认证方式</label>
+            <select id="server-auth"><option value="key" ${(remote.auth_type || 'key') === 'key' ? 'selected' : ''}>SSH key / agent</option><option value="password" ${remote.auth_type === 'password' ? 'selected' : ''}>密码</option></select>
+          </div>
+          <div class="field"><label for="server-key">私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
+          <div class="field"><label for="server-password">SSH 密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
+          <div class="field span-2"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/tmp/ascendforge')}" required></div>
+        </div>
+        <div id="server-error"></div>
+        <div class="form-actions">
+          <button class="btn" type="button" data-server-action="test">测试连接</button>
+          <button class="btn btn-primary" type="button" data-server-action="connect">${remote.status === 'connected' ? '重新连接' : '连接'}</button>
+          ${remote.status === 'connected' ? '<button class="btn btn-danger" type="button" data-server-action="disconnect">断开</button>' : ''}
+        </div>
+      </form>
+      <div class="small faint" style="margin-top:10px">连接后，新启动或恢复的 Codex 会话会获得 <span class="mono">remote_exec</span>；远端命令统一走宿主持有的 SSH bridge。</div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -1357,6 +1337,9 @@ async function renderConnections() {
     toast('已断开', 'success');
     await renderConnections();
   });
+  $$('[data-server-action]').forEach((button) => {
+    button.addEventListener('click', () => serverAction(button.dataset.serverAction, renderConnections));
+  });
 
 }
 
@@ -1366,12 +1349,10 @@ async function renderConnections() {
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch (_) { /* ignore */ }
   state.me = null; state.csrf = null;
-  clearInterval(state.workerTimer); clearInterval(state.remoteTimer); clearInterval(state.timer);
+  clearInterval(state.workerTimer); clearInterval(state.timer);
   renderLogin();
 });
 
-$('#server-btn').addEventListener('click', openServerModal);
-
-window.addEventListener('beforeunload', () => { clearInterval(state.timer); clearInterval(state.workerTimer); clearInterval(state.remoteTimer); });
+window.addEventListener('beforeunload', () => { clearInterval(state.timer); clearInterval(state.workerTimer); });
 
 boot();
