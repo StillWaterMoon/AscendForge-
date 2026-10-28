@@ -719,11 +719,40 @@ def run_codex_agent(
         raise ValueError(f"unknown tool: {tool}")
 
     turn_error: str | None = None
+    turn_error_code: str | None = None
+    turn_error_stage: str | None = None
     try:
         thread_name = _codex_thread_name(task)
         if mode == "recovery":
             thread_name = f"{task.get('problem_title') or task.get('title') or task_id}逆向评测数据"
         remote_active = RemoteBridgeClient.available(db)
+        if remote_active:
+            try:
+                prepared = RemoteBridgeClient(db).prepare_task(task_id)
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "remote_task_dir_ready",
+                    {"remote_dir": prepared.get("remote_dir")},
+                )
+            except RemoteError as exc:
+                turn_error = str(exc)
+                turn_error_code = "REMOTE_PREPARE_FAILED"
+                turn_error_stage = "remote_prepare"
+                add_event(
+                    db,
+                    task_id,
+                    None,
+                    "remote_task_dir_failed",
+                    {"error": turn_error},
+                )
+                db.execute(
+                    "UPDATE tasks SET status='paused', paused_at=?, last_error_code=?, "
+                    "last_error=?, updated_at=? WHERE id=?",
+                    (now(), turn_error_code, turn_error[:2000], now(), task_id),
+                )
+                raise CodexLoopError(f"远端任务目录创建失败：{turn_error}") from None
         adapter = AppServerAdapter(
             timeout_sec=timeout_sec,
             on_event=on_event,
@@ -835,8 +864,6 @@ def run_codex_agent(
             + (prompt or "")
         )
         turns = 0
-        turn_error_code: str | None = None
-        turn_error_stage: str | None = None
         while True:
             current = tasks.get(task_id)
             current_config = current.get("config") or {}

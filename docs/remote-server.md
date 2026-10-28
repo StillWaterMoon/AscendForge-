@@ -76,7 +76,7 @@ ssh -J jt_xxx:token@113.47.8.48:2234 root@179.62.58.131
 跳板机端口          2234
 跳板机用户名        jt_xxx:token
 跳板机认证          用户名 token（无密码）
-远程工作目录        /tmp/ascendforge
+远程工作目录        /workspace
 ```
 
 “测试连接”只做 SSH 握手和 `true`；“连接”启动常驻 `remote-bridge` 进程并保持 SSH 连接。
@@ -89,10 +89,18 @@ ssh -J jt_xxx:token@113.47.8.48:2234 root@179.62.58.131
 remote_exec(command, timeout?)
 ```
 
-调用时宿主：
+连接后，每个任务在启动时先在远端创建自己的目录：
+
+```text
+<remote_root>/<task_id>
+```
+
+默认 `remote_root` 是 `/workspace`。任务目录首次创建后保留，后续同步只覆盖源码文件，不删除远端已有产物。
+
+调用 `remote_exec` 时宿主：
 
 1. 读取当前本地 workspace 源码；
-2. 通过桥删除并重建远端 `<remote_root>/<task_id>`；
+2. 确保远端任务目录存在；
 3. 上传源码；
 4. 在远端目录执行 shell 命令；
 5. 返回 `exit_code/stdout/stderr`。

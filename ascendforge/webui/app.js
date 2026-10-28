@@ -272,7 +272,7 @@ function applyServerConfig(c) {
   setServerField('jump-auth', c.jump_auth_type || 'none');
   setServerField('jump-key', '');
   setServerField('jump-password', c.jump_password || '');
-  setServerField('server-root', c.remote_root || '/tmp/ascendforge');
+  setServerField('server-root', c.remote_root || '/workspace');
 }
 
 async function parseServerCommand() {
@@ -331,7 +331,7 @@ async function serverAction(action, onSuccess) {
     auth_type: remoteFormValue('server-auth') || 'key',
     key_path: remoteFormValue('server-key'),
     password: document.getElementById('server-password')?.value || '',
-    remote_root: remoteFormValue('server-root') || '/tmp/ascendforge',
+    remote_root: remoteFormValue('server-root') || '/workspace',
     jump_host: remoteFormValue('jump-host'),
     jump_port: Number(remoteFormValue('jump-port') || 22),
     jump_username: remoteFormValue('jump-user'),
@@ -1330,7 +1330,7 @@ async function renderConnections() {
           </div>
           <div class="field"><label for="jump-key">跳板机私钥路径</label><input id="jump-key" value="${esc(remote.jump_key_path || '')}"></div>
           <div class="field"><label for="jump-password">跳板机密码（仅 password 模式）</label><input id="jump-password" type="password" autocomplete="new-password" placeholder="${remote.jump_auth_type === 'password' ? '已保存，留空不修改' : 'token 模式不需要密码'}"></div>
-          <div class="field span-2"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/tmp/ascendforge')}" required></div>
+          <div class="field span-2"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/workspace')}" required></div>
         </div>
         <div id="server-error"></div>
         <div class="form-actions">

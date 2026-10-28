@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS remote_servers (
     jump_username TEXT,
     jump_auth_type TEXT,
     jump_key_path TEXT,
-    remote_root TEXT NOT NULL DEFAULT '/tmp/ascendforge',
+    remote_root TEXT NOT NULL DEFAULT '/workspace',
     status TEXT NOT NULL DEFAULT 'disconnected',
     bridge_port INTEGER,
     bridge_token TEXT,

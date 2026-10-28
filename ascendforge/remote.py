@@ -192,7 +192,7 @@ def parse_ssh_connect_command(command: str, connection_password: str) -> dict:
         "username": target_user,
         "auth_type": "password",
         "password": connection_password,
-        "remote_root": "/tmp/ascendforge",
+        "remote_root": "/workspace",
         "jump_host": jump_host,
         "jump_port": jump_port,
         "jump_username": jump_user,
@@ -276,7 +276,7 @@ class RemoteStore:
         host = str(payload.get("host") or "").strip()
         username = str(payload.get("username") or "").strip()
         auth_type = str(payload.get("auth_type") or "key").strip()
-        remote_root = str(payload.get("remote_root") or "/tmp/ascendforge").strip()
+        remote_root = str(payload.get("remote_root") or "/workspace").strip()
         try:
             port = int(payload.get("port") or 22)
         except (TypeError, ValueError):
@@ -617,6 +617,9 @@ class RemoteBridge:
             action = str(request.get("action") or "")
             if action == "ping":
                 self._reply(file, {"ok": True, "pid": os.getpid()})
+            elif action == "prepare":
+                with self.lock:
+                    self._reply(file, self._prepare(request))
             elif action == "exec":
                 with self.lock:
                     result = self._exec(request)
@@ -638,6 +641,23 @@ class RemoteBridge:
     def _reply(file, payload: dict) -> None:
         file.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
         file.flush()
+
+    def _prepare(self, request: dict) -> dict:
+        task_id = str(request.get("task_id") or "")
+        row = self.store.get()
+        if not row:
+            return {"ok": False, "error": "尚未配置远程服务器"}
+        remote_dir = _safe_task_dir(str(row["remote_root"]), task_id)
+        assert self.client is not None
+        _, stdout, stderr = self.client.exec_command(
+            f"mkdir -p {shlex.quote(remote_dir)}", timeout=30, get_pty=False
+        )
+        code = stdout.channel.recv_exit_status()
+        err = stderr.read().decode("utf-8", errors="replace")
+        self.store.set_status(last_seen=now())
+        if code != 0:
+            return {"ok": False, "error": f"mkdir failed: {err[:500]}"}
+        return {"ok": True, "remote_dir": remote_dir}
 
     def _exec(self, request: dict) -> dict:
         task_id = str(request.get("task_id") or "")
@@ -688,8 +708,10 @@ class RemoteBridge:
             cleaned[rel] = content
         assert self.client is not None
         quoted = shlex.quote(remote_dir)
+        # Keep the task-owned remote directory and its artifacts.  Only source
+        # files are overwritten by the next sync.
         _, stdout, stderr = self.client.exec_command(
-            f"rm -rf {quoted} && mkdir -p {quoted}", timeout=30, get_pty=False
+            f"mkdir -p {quoted}", timeout=30, get_pty=False
         )
         stdout.channel.recv_exit_status()
         err = stderr.read().decode("utf-8", errors="replace")
@@ -757,6 +779,12 @@ class RemoteBridgeClient:
         result = json.loads(raw.decode("utf-8"))
         if not isinstance(result, dict):
             raise RemoteError("远程执行桥返回格式错误")
+        return result
+
+    def prepare_task(self, task_id: str) -> dict:
+        result = self.request({"action": "prepare", "task_id": task_id}, timeout=45)
+        if not result.get("ok"):
+            raise RemoteError(str(result.get("error") or "远端任务目录创建失败"))
         return result
 
     def exec_workspace(self, workspace: Path, task_id: str, command: str, timeout: int = 600) -> dict:

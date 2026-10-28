@@ -127,6 +127,7 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(parsed["jump_username"], "jt_ABC:jump-secret")
         self.assertEqual(parsed["jump_auth_type"], "none")
         self.assertIsNone(parsed["jump_password"])
+        self.assertEqual(parsed["remote_root"], "/workspace")
         with self.assertRaises(RemoteError):
             parse_ssh_connect_command("bash root@example.com", "x")
         with self.assertRaises(RemoteError):
