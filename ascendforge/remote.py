@@ -348,6 +348,57 @@ class RemoteStore:
         secret = self.secret()
         paramiko = _paramiko()
 
+        def password_client(
+            host: str,
+            port: int,
+            username: str,
+            password: str,
+            sock=None,
+        ):
+            """Password or keyboard-interactive auth.
+
+            Some jump gateways expose the one-time credential only through
+            keyboard-interactive auth and close the transport after a plain
+            password attempt.  Try keyboard-interactive first; if the server
+            advertises that it is unsupported, fall back to password on the
+            same transport.
+            """
+            raw_socket = sock
+            if raw_socket is None:
+                raw_socket = socket.create_connection((host, int(port)), timeout=timeout)
+            transport = paramiko.Transport(raw_socket)
+            try:
+                transport.start_client(timeout=timeout)
+                transport.set_keepalive(30)
+
+                def answer(title, instructions, prompts):
+                    return [password for _ in prompts]
+
+                try:
+                    transport.auth_interactive_dumb(username, answer)
+                except Exception as interactive_exc:
+                    if not transport.is_active():
+                        raise RemoteError(
+                            "服务器在认证阶段关闭了 SSH 会话；密码可能已过期，或需要重新获取连接命令"
+                        ) from interactive_exc
+                    try:
+                        transport.auth_password(username, password)
+                    except Exception as password_exc:
+                        raise RemoteError(
+                            "密码和 keyboard-interactive 认证均失败；请确认跳板机/目标机密码，或重新获取连接命令"
+                        ) from password_exc
+                if not transport.is_authenticated():
+                    raise RemoteError("SSH 认证未完成")
+                client = paramiko.SSHClient()
+                client._transport = transport
+                return client
+            except Exception:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+                raise
+
         def make_client(
             host: str,
             port: int,
@@ -358,6 +409,8 @@ class RemoteStore:
             passphrase: str | None,
             sock=None,
         ):
+            if auth_type == "password":
+                return password_client(host, port, username, password or "", sock=sock)
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             kwargs: dict[str, Any] = {
@@ -369,15 +422,12 @@ class RemoteStore:
                 "auth_timeout": timeout,
                 "allow_agent": True,
                 "look_for_keys": True,
+                "key_filename": key_path,
             }
             if sock is not None:
                 kwargs["sock"] = sock
-            if auth_type == "password":
-                kwargs["password"] = password or ""
-            else:
-                kwargs["key_filename"] = key_path
-                if passphrase:
-                    kwargs["passphrase"] = passphrase
+            if passphrase:
+                kwargs["passphrase"] = passphrase
             client.connect(**kwargs)
             transport = client.get_transport()
             if transport is not None:
@@ -405,10 +455,12 @@ class RemoteStore:
                     (row["host"], int(row["port"])),
                     ("127.0.0.1", 0),
                 )
-            except Exception:
+            except Exception as exc:
                 if jump_client:
-                    jump_client.close()
-                raise
+                    close_ssh_client(jump_client)
+                if isinstance(exc, RemoteError):
+                    raise RemoteError(f"跳板机连接失败：{exc}") from exc
+                raise RemoteError(f"跳板机连接失败：{type(exc).__name__}: {exc}") from exc
         try:
             client = make_client(
                 row["host"],
@@ -420,10 +472,12 @@ class RemoteStore:
                 secret.get("passphrase"),
                 sock=channel,
             )
-        except Exception:
+        except Exception as exc:
             if jump_client:
-                jump_client.close()
-            raise
+                close_ssh_client(jump_client)
+            if isinstance(exc, RemoteError):
+                raise RemoteError(f"目标机连接失败：{exc}") from exc
+            raise RemoteError(f"目标机连接失败：{type(exc).__name__}: {exc}") from exc
         client._jump_client = jump_client
         client._jump_channel = channel
         return client
