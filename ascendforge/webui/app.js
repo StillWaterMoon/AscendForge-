@@ -259,6 +259,22 @@ function setServerField(id, value) {
   if (el) el.value = value ?? '';
 }
 
+function applyServerConfig(c) {
+  setServerField('server-host', c.host);
+  setServerField('server-port', c.port);
+  setServerField('server-user', c.username);
+  setServerField('server-auth', c.auth_type || 'password');
+  setServerField('server-key', '');
+  setServerField('server-password', c.password || '');
+  setServerField('jump-host', c.jump_host || '');
+  setServerField('jump-port', c.jump_port || 22);
+  setServerField('jump-user', c.jump_username || '');
+  setServerField('jump-auth', c.jump_auth_type || 'password');
+  setServerField('jump-key', '');
+  setServerField('jump-password', c.jump_password || '');
+  setServerField('server-root', c.remote_root || '/tmp/ascendforge');
+}
+
 async function parseServerCommand() {
   const errorBox = $('#server-error');
   if (errorBox) errorBox.innerHTML = '';
@@ -271,20 +287,7 @@ async function parseServerCommand() {
       },
       idem: false,
     });
-    const c = data.config || {};
-    setServerField('server-host', c.host);
-    setServerField('server-port', c.port);
-    setServerField('server-user', c.username);
-    setServerField('server-auth', c.auth_type || 'password');
-    setServerField('server-key', '');
-    setServerField('server-password', c.password || '');
-    setServerField('jump-host', c.jump_host || '');
-    setServerField('jump-port', c.jump_port || 22);
-    setServerField('jump-user', c.jump_username || '');
-    setServerField('jump-auth', c.jump_auth_type || 'password');
-    setServerField('jump-key', '');
-    setServerField('jump-password', c.jump_password || '');
-    setServerField('server-root', c.remote_root || '/tmp/ascendforge');
+    applyServerConfig(data.config || {});
     toast('已从官方命令填充连接信息', 'success');
   } catch (err) {
     if (errorBox) errorBox.innerHTML = `<div class="alert error">${esc(err.message || '解析失败')}</div>`;
@@ -294,6 +297,23 @@ async function parseServerCommand() {
 async function serverAction(action, onSuccess) {
   const errorBox = $('#server-error');
   if (errorBox) errorBox.innerHTML = '';
+  const quickCommand = document.getElementById('quick-ssh-command')?.value.trim() || '';
+  if (action !== 'disconnect' && quickCommand) {
+    try {
+      const data = await api('/api/remote/parse', {
+        method: 'POST',
+        body: {
+          command: quickCommand,
+          connection_password: document.getElementById('quick-connection-password')?.value || '',
+        },
+        idem: false,
+      });
+      applyServerConfig(data.config || {});
+    } catch (err) {
+      if (errorBox) errorBox.innerHTML = `<div class="alert error">${esc(err.message || '命令解析失败')}</div>`;
+      return;
+    }
+  }
   if (action === 'disconnect') {
     try {
       await api('/api/remote/disconnect', { method: 'POST', body: {} });
@@ -1291,16 +1311,17 @@ async function renderConnections() {
           <div class="field"><label for="quick-connection-password">连接密码</label><input id="quick-connection-password" type="password" autocomplete="new-password" placeholder="官方弹窗里的“连接密码”"></div>
           <div class="field"><label>&nbsp;</label><button class="btn" id="parse-server-command" type="button">解析并填充</button></div>
         </div>
+        <div class="field span-2"><div class="small faint" style="margin-top:6px">目标机（最终运行命令的 NPU 服务器）</div></div>
         <div class="form-grid">
-          <div class="field"><label for="server-host">主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="192.0.2.10" required></div>
-          <div class="field"><label for="server-port">SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
-          <div class="field"><label for="server-user">用户名</label><input id="server-user" value="${esc(remote.username || '')}" required></div>
-          <div class="field"><label for="server-auth">认证方式</label>
+          <div class="field"><label for="server-host">目标机主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="179.62.58.131" required></div>
+          <div class="field"><label for="server-port">目标机 SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
+          <div class="field"><label for="server-user">目标机用户名</label><input id="server-user" value="${esc(remote.username || '')}" placeholder="root" required></div>
+          <div class="field"><label for="server-auth">目标机认证方式</label>
             <select id="server-auth"><option value="key" ${(remote.auth_type || 'key') === 'key' ? 'selected' : ''}>SSH key / agent</option><option value="password" ${remote.auth_type === 'password' ? 'selected' : ''}>密码</option></select>
           </div>
-          <div class="field"><label for="server-key">私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
-          <div class="field"><label for="server-password">SSH 密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
-          <div class="field span-2"><div class="small faint" style="margin-top:6px">跳板机（可选；对应 ssh -J user@jump:port target）</div></div>
+          <div class="field"><label for="server-key">目标机私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
+          <div class="field"><label for="server-password">目标机密码 / 连接密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
+          <div class="field span-2"><div class="small faint" style="margin-top:6px">跳板机（可选；对应 ssh -J user:password@jump:port target）</div></div>
           <div class="field"><label for="jump-host">跳板机主机</label><input id="jump-host" value="${esc(remote.jump_host || '')}" placeholder="留空表示直连"></div>
           <div class="field"><label for="jump-port">跳板机端口</label><input id="jump-port" type="number" value="${esc(remote.jump_port || 22)}"></div>
           <div class="field"><label for="jump-user">跳板机用户名</label><input id="jump-user" value="${esc(remote.jump_username || '')}"></div>
