@@ -188,6 +188,8 @@ class WebTests(unittest.TestCase):
         )
         self.assertEqual(status, 200, payload)
         self.assertEqual(payload["config"]["jump_port"], 2234)
+        self.assertEqual(payload["config"]["jump_username"], "jt_x:jump")
+        self.assertEqual(payload["config"]["jump_auth_type"], "none")
         self.assertEqual(payload["config"]["host"], "179.62.58.131")
 
     def test_04b_project_template_upload_and_create(self):

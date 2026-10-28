@@ -269,7 +269,7 @@ function applyServerConfig(c) {
   setServerField('jump-host', c.jump_host || '');
   setServerField('jump-port', c.jump_port || 22);
   setServerField('jump-user', c.jump_username || '');
-  setServerField('jump-auth', c.jump_auth_type || 'password');
+  setServerField('jump-auth', c.jump_auth_type || 'none');
   setServerField('jump-key', '');
   setServerField('jump-password', c.jump_password || '');
   setServerField('server-root', c.remote_root || '/tmp/ascendforge');
@@ -335,7 +335,7 @@ async function serverAction(action, onSuccess) {
     jump_host: remoteFormValue('jump-host'),
     jump_port: Number(remoteFormValue('jump-port') || 22),
     jump_username: remoteFormValue('jump-user'),
-    jump_auth_type: remoteFormValue('jump-auth') || 'password',
+    jump_auth_type: remoteFormValue('jump-auth') || 'none',
     jump_key_path: remoteFormValue('jump-key'),
     jump_password: document.getElementById('jump-password')?.value || '',
   };
@@ -1305,7 +1305,7 @@ async function renderConnections() {
         ${remote.status === 'connected' ? badge('已连接', 'completed') : remote.status === 'connecting' ? badge('连接中', 'pending') : remote.status === 'error' ? badge('连接失败', 'failed') : badge('未连接', 'pending')}</div>
       ${remote.last_error ? `<div class="alert error small" style="margin-bottom:12px">${esc(remote.last_error)}</div>` : ''}
       <form id="server-form" class="stack">
-        <div class="alert info small">官方 NPU 环境给的命令通常形如 <span class="mono">ssh -J user:password@jump:port root@target</span>，有效期约 5 分钟。把整条命令和连接密码粘贴到下面，点击“解析并填充”。</div>
+        <div class="alert info small">官方 NPU 环境给的命令通常形如 <span class="mono">ssh -J jt_xxx:token@jump:port root@target</span>，其中 <span class="mono">jt_xxx:token</span> 是<strong>跳板机用户名</strong>，不是密码；有效期约 5 分钟。把整条命令和连接密码粘贴到下面，点击“解析并填充”，然后立即测试/连接。</div>
         <div class="field"><label for="quick-ssh-command">官方 SSH 连接命令</label><textarea id="quick-ssh-command" rows="3" placeholder="ssh -J jt_xxx:xxx@113.47.8.48:2234 root@179.62.58.131" style="width:100%;font-family:var(--mono)"></textarea></div>
         <div class="form-grid">
           <div class="field"><label for="quick-connection-password">连接密码</label><input id="quick-connection-password" type="password" autocomplete="new-password" placeholder="官方弹窗里的“连接密码”"></div>
@@ -1321,15 +1321,15 @@ async function renderConnections() {
           </div>
           <div class="field"><label for="server-key">目标机私钥路径（key 模式）</label><input id="server-key" value="${esc(remote.key_path || '')}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></div>
           <div class="field"><label for="server-password">目标机密码 / 连接密码（留空保持原值）</label><input id="server-password" type="password" autocomplete="new-password" placeholder="${remote.auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
-          <div class="field span-2"><div class="small faint" style="margin-top:6px">跳板机（可选；对应 ssh -J user:password@jump:port target）</div></div>
+          <div class="field span-2"><div class="small faint" style="margin-top:6px">跳板机（官方 -J 的完整 userinfo 是跳板机用户名，例如 <span class="mono">jt_xxx:token</span>，不是密码）</div></div>
           <div class="field"><label for="jump-host">跳板机主机</label><input id="jump-host" value="${esc(remote.jump_host || '')}" placeholder="留空表示直连"></div>
           <div class="field"><label for="jump-port">跳板机端口</label><input id="jump-port" type="number" value="${esc(remote.jump_port || 22)}"></div>
           <div class="field"><label for="jump-user">跳板机用户名</label><input id="jump-user" value="${esc(remote.jump_username || '')}"></div>
           <div class="field"><label for="jump-auth">跳板机认证</label>
-            <select id="jump-auth"><option value="password" ${(remote.jump_auth_type || 'password') === 'password' ? 'selected' : ''}>密码</option><option value="key" ${remote.jump_auth_type === 'key' ? 'selected' : ''}>SSH key</option></select>
+            <select id="jump-auth"><option value="none" ${(remote.jump_auth_type || 'none') === 'none' ? 'selected' : ''}>用户名 token（无密码）</option><option value="password" ${remote.jump_auth_type === 'password' ? 'selected' : ''}>密码</option><option value="key" ${remote.jump_auth_type === 'key' ? 'selected' : ''}>SSH key</option></select>
           </div>
           <div class="field"><label for="jump-key">跳板机私钥路径</label><input id="jump-key" value="${esc(remote.jump_key_path || '')}"></div>
-          <div class="field"><label for="jump-password">跳板机密码（留空保持原值）</label><input id="jump-password" type="password" autocomplete="new-password" placeholder="${remote.jump_auth_type === 'password' ? '已保存，留空不修改' : '仅密码认证需要'}"></div>
+          <div class="field"><label for="jump-password">跳板机密码（仅 password 模式）</label><input id="jump-password" type="password" autocomplete="new-password" placeholder="${remote.jump_auth_type === 'password' ? '已保存，留空不修改' : 'token 模式不需要密码'}"></div>
           <div class="field span-2"><label for="server-root">远程工作目录</label><input id="server-root" value="${esc(remote.remote_root || '/tmp/ascendforge')}" required></div>
         </div>
         <div id="server-error"></div>

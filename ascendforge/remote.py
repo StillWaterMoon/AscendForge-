@@ -157,17 +157,16 @@ def parse_ssh_connect_command(command: str, connection_password: str) -> dict:
             return tuple(value.rsplit("@", 1))  # type: ignore[return-value]
         return None, value
 
-    jump_user = jump_password = None
+    jump_user = None
     jump_host = jump_port = None
     if jump_spec:
-        jump_userinfo, jump_hostport = split_user(jump_spec)
-        if jump_userinfo and ":" in jump_userinfo:
-            jump_user, jump_password = jump_userinfo.split(":", 1)
-        else:
-            jump_user = jump_userinfo
+        jump_user, jump_hostport = split_user(jump_spec)
+        # The provider uses a username token of the form
+        # ``jt_xxx:<token>``.  It is ONE username, not user:password.
+        # OpenSSH passes the colon through to the jump host verbatim.
         jump_host, jump_port = split_host_port(jump_hostport)
         if not jump_host or not jump_user:
-            raise RemoteError("跳板机格式应为 user:password@host:port")
+            raise RemoteError("跳板机格式应为 user@host:port")
         if jump_port is None:
             jump_port = 22
 
@@ -193,9 +192,9 @@ def parse_ssh_connect_command(command: str, connection_password: str) -> dict:
         "jump_host": jump_host,
         "jump_port": jump_port,
         "jump_username": jump_user,
-        "jump_auth_type": "password" if jump_host else None,
+        "jump_auth_type": "none" if jump_host else None,
         "jump_key_path": None,
-        "jump_password": jump_password,
+        "jump_password": None,
     }
 
 
@@ -295,8 +294,8 @@ class RemoteStore:
                 raise RemoteError("跳板机用户名不能为空")
             if jump_port is None or not 1 <= jump_port <= 65535:
                 raise RemoteError("跳板机端口必须在 1..65535")
-            if jump_auth_type not in ("key", "password"):
-                raise RemoteError("跳板机认证方式只能是 key 或 password")
+            if jump_auth_type not in ("none", "key", "password"):
+                raise RemoteError("跳板机认证方式只能是 none、key 或 password")
             if jump_auth_type == "key" and not jump_key_path:
                 raise RemoteError("跳板机 key 认证需要填写私钥路径")
         password = payload.get("password")
@@ -399,6 +398,30 @@ class RemoteStore:
                     pass
                 raise
 
+        def none_client(host: str, port: int, username: str, sock=None):
+            """Provider jump token is carried in the username; no password auth."""
+            raw_socket = sock
+            if raw_socket is None:
+                raw_socket = socket.create_connection((host, int(port)), timeout=timeout)
+            transport = paramiko.Transport(raw_socket)
+            try:
+                transport.start_client(timeout=timeout)
+                transport.set_keepalive(30)
+                allowed = transport.auth_none(username)
+                if not transport.is_authenticated():
+                    raise RemoteError(
+                        f"跳板机用户名 token 认证失败；允许的认证方式：{allowed or '未知'}"
+                    )
+                client = paramiko.SSHClient()
+                client._transport = transport
+                return client
+            except Exception:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+                raise
+
         def make_client(
             host: str,
             port: int,
@@ -409,6 +432,8 @@ class RemoteStore:
             passphrase: str | None,
             sock=None,
         ):
+            if auth_type == "none":
+                return none_client(host, port, username, sock=sock)
             if auth_type == "password":
                 return password_client(host, port, username, password or "", sock=sock)
             client = paramiko.SSHClient()
@@ -458,6 +483,10 @@ class RemoteStore:
             except Exception as exc:
                 if jump_client:
                     close_ssh_client(jump_client)
+                if "Administratively prohibited" in str(exc):
+                    raise RemoteError(
+                        "跳板机拒绝端口转发：官方连接 token 已过期或没有转发权限；请重新获取 SSH 直连命令"
+                    ) from exc
                 if isinstance(exc, RemoteError):
                     raise RemoteError(f"跳板机连接失败：{exc}") from exc
                 raise RemoteError(f"跳板机连接失败：{type(exc).__name__}: {exc}") from exc

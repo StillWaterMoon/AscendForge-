@@ -60,6 +60,24 @@ class RemoteTests(unittest.TestCase):
         self.assertNotIn("jump_password", public)
         self.assertEqual(self.store.secret()["jump_password"], "jump-secret")
 
+    def test_jump_token_auth_requires_no_jump_password(self):
+        public = self.store.save(
+            {
+                "host": "179.62.58.131",
+                "port": 22,
+                "username": "root",
+                "auth_type": "password",
+                "password": "target-secret",
+                "remote_root": "/tmp/ascendforge",
+                "jump_host": "113.47.8.48",
+                "jump_port": 2234,
+                "jump_username": "jt_test:token-value",
+                "jump_auth_type": "none",
+            }
+        )
+        self.assertEqual(public["jump_auth_type"], "none")
+        self.assertEqual(public["jump_username"], "jt_test:token-value")
+
     def test_key_auth_requires_key_path(self):
         with self.assertRaises(RemoteError):
             self.store.save(
@@ -106,8 +124,9 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(parsed["password"], "target-secret")
         self.assertEqual(parsed["jump_host"], "113.47.8.48")
         self.assertEqual(parsed["jump_port"], 2234)
-        self.assertEqual(parsed["jump_username"], "jt_ABC")
-        self.assertEqual(parsed["jump_password"], "jump-secret")
+        self.assertEqual(parsed["jump_username"], "jt_ABC:jump-secret")
+        self.assertEqual(parsed["jump_auth_type"], "none")
+        self.assertIsNone(parsed["jump_password"])
         with self.assertRaises(RemoteError):
             parse_ssh_connect_command("bash root@example.com", "x")
         with self.assertRaises(RemoteError):

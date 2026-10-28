@@ -50,26 +50,32 @@ ssh -J jt_xxx:jump_password@113.47.8.48:2234 root@179.62.58.131
 ssh -J jump_user@jump_host:jump_port root@target
 ```
 
-应用内不解析 `user:password@host:port` 这种字符串；跳板机密码填在单独的“跳板机密码”字段。
+注意官方命令里的冒号可能是用户名 token，例如：
+
+```text
+jt_xxx:token
+```
+
+整个 `jt_xxx:token` 是**跳板机用户名**，不是 `user:password`。这种跳板机使用 `none` 认证，不需要单独的跳板机密码；连接密码是目标机 `root` 的密码。
 
 例如：
 
 ```bash
-ssh -J jump_user:jump_password@113.47.8.48:2234 root@179.62.58.131
+ssh -J jt_xxx:token@113.47.8.48:2234 root@179.62.58.131
 ```
 
 网页填写：
 
 ```text
-主机                179.62.58.131
-SSH 端口            22
-用户名              root
-认证方式            按目标机实际的 key/密码
+目标机主机          179.62.58.131
+目标机端口          22
+目标机用户名        root
+目标机认证          密码
+目标机密码          官方弹窗的“连接密码”
 跳板机主机          113.47.8.48
 跳板机端口          2234
-跳板机用户名        jump_user
-跳板机认证          密码
-跳板机密码          jump_password
+跳板机用户名        jt_xxx:token
+跳板机认证          用户名 token（无密码）
 远程工作目录        /tmp/ascendforge
 ```
 
