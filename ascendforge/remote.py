@@ -240,6 +240,9 @@ def _public(row: dict | None) -> dict | None:
         "remote_root": row["remote_root"],
         "status": row["status"],
         "pid": row.get("pid"),
+        "npu_available": None if row.get("npu_available") is None else bool(row["npu_available"]),
+        "npu_evidence": row.get("npu_evidence"),
+        "npu_checked_at": row.get("npu_checked_at"),
         "last_error": row.get("last_error"),
         "last_seen": row.get("last_seen"),
     }
@@ -344,7 +347,8 @@ class RemoteStore:
             "jump_username=excluded.jump_username, jump_auth_type=excluded.jump_auth_type, "
             "jump_key_path=excluded.jump_key_path, "
             "remote_root=excluded.remote_root, status='disconnected', pid=NULL, bridge_port=NULL, "
-            "bridge_token=NULL, last_error=NULL, updated_at=excluded.updated_at",
+            "bridge_token=NULL, npu_available=NULL, npu_evidence=NULL, npu_checked_at=NULL, "
+            "last_error=NULL, updated_at=excluded.updated_at",
             (
                 REMOTE_ID, host, port, username, auth_type, key_path,
                 jump_host, jump_port, jump_username, jump_auth_type, jump_key_path,
@@ -549,8 +553,40 @@ class RemoteBridge:
         self.lock = threading.Lock()
         self.stopping = threading.Event()
 
+    def _probe_npu(self) -> None:
+        if self.client is None:
+            return
+        command = (
+            "if command -v npu-smi >/dev/null 2>&1; then "
+            "echo 'npu-smi:'$(command -v npu-smi); npu-smi info 2>&1 | head -40; "
+            "elif ls /dev/davinci* >/dev/null 2>&1; then "
+            "echo 'davinci devices:'; ls -1 /dev/davinci* 2>&1 | head -20; "
+            "elif [ -d /usr/local/Ascend ]; then "
+            "echo '/usr/local/Ascend present'; "
+            "else echo 'NO_NPU'; exit 3; fi"
+        )
+        try:
+            _, stdout, stderr = self.client.exec_command(command, timeout=20, get_pty=False)
+            output = stdout.read(4096).decode("utf-8", errors="replace")
+            err = stderr.read(2048).decode("utf-8", errors="replace")
+            code = stdout.channel.recv_exit_status()
+            evidence = (output + ("\n" + err if err.strip() else "")).strip()[:1500]
+            available = code == 0 and "NO_NPU" not in output
+            self.store.set_status(
+                npu_available=1 if available else 0,
+                npu_evidence=evidence or "未检测到 NPU 证据",
+                npu_checked_at=now(),
+            )
+        except Exception as exc:
+            self.store.set_status(
+                npu_available=0,
+                npu_evidence=f"NPU 探测失败：{exc}"[:1500],
+                npu_checked_at=now(),
+            )
+
     def start(self) -> None:
         self.client = self.store.connect_client()
+        self._probe_npu()
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind(("127.0.0.1", 0))

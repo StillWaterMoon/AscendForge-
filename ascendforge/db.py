@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -169,6 +169,9 @@ CREATE TABLE IF NOT EXISTS remote_servers (
     bridge_port INTEGER,
     bridge_token TEXT,
     pid INTEGER,
+    npu_available INTEGER,
+    npu_evidence TEXT,
+    npu_checked_at REAL,
     last_error TEXT,
     last_seen REAL,
     created_at REAL NOT NULL,
@@ -447,6 +450,9 @@ class Database:
                 "jump_username": "TEXT",
                 "jump_auth_type": "TEXT",
                 "jump_key_path": "TEXT",
+                "npu_available": "INTEGER",
+                "npu_evidence": "TEXT",
+                "npu_checked_at": "REAL",
             },
             "submissions": {
                 "diagnostic": "INTEGER NOT NULL DEFAULT 0",

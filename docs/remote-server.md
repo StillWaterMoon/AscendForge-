@@ -81,6 +81,18 @@ ssh -J jt_xxx:token@113.47.8.48:2234 root@179.62.58.131
 
 “测试连接”只做 SSH 握手和 `true`；“连接”启动常驻 `remote-bridge` 进程并保持 SSH 连接。
 
+## NPU 状态
+
+连接建立后，bridge 会在远端执行一次 NPU 探测：
+
+```text
+npu-smi info
+/dev/davinci*
+/usr/local/Ascend
+```
+
+并把结果写入连接状态。Web 顶部的 NPU 标记和“服务器能力”会优先显示远程 NPU，不再使用本地机器有没有 NPU 来判断。
+
 ## remote_exec
 
 连接成功且任务启动/恢复时，Codex 会额外获得：

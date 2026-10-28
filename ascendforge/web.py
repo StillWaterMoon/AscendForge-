@@ -171,13 +171,24 @@ class App:
         return self.platform.status()
 
     def capabilities(self) -> dict:
-        return detect_capabilities(self.settings)
+        caps = detect_capabilities(self.settings)
+        remote = self.remote.public()
+        if remote.get("status") == "connected":
+            available = bool(remote.get("npu_available"))
+            caps["npu"] = {
+                "available": available,
+                "status": "available" if available else "unavailable",
+                "evidence": remote.get("npu_evidence") or "远程 NPU 尚未探测",
+                "checked_at": remote.get("npu_checked_at"),
+                "source": "remote",
+            }
+        return caps
 
     def summary(self) -> dict:
         counts = self.tasks.status_counts()
         recent = self.tasks.list()[:8]
         platform = self.platform_public()
-        capabilities = detect_capabilities(self.settings)
+        capabilities = self.capabilities()
         return {
             "product": "AscendForge",
             "product_zh": "昇腾工坊",
