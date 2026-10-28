@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import shlex
 import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +61,9 @@ def _paramiko():
 def _safe_task_dir(root: str, task_id: str) -> str:
     if not TASK_ID_RE.match(task_id):
         raise RemoteError("invalid task id")
-    return str(Path(root) / task_id)
+    if not root.startswith("/"):
+        raise RemoteError("remote_root 必须是 POSIX 绝对路径")
+    return posixpath.join(root.rstrip("/"), task_id)
 
 
 def _pid_alive(pid: int | None) -> bool:
@@ -198,6 +202,11 @@ def parse_ssh_connect_command(command: str, connection_password: str) -> dict:
     }
 
 
+def _provider_token_username(username: str | None) -> bool:
+    """The NPU provider puts its one-time token inside a ``jt_*`` username."""
+    return bool(username and username.startswith("jt_") and ":" in username)
+
+
 def close_ssh_client(client) -> None:
     if not client:
         return
@@ -226,7 +235,7 @@ def _public(row: dict | None) -> dict | None:
         "jump_host": row.get("jump_host"),
         "jump_port": row.get("jump_port"),
         "jump_username": row.get("jump_username"),
-        "jump_auth_type": row.get("jump_auth_type"),
+        "jump_auth_type": "none" if _provider_token_username(row.get("jump_username")) else row.get("jump_auth_type"),
         "jump_key_path": row.get("jump_key_path"),
         "remote_root": row["remote_root"],
         "status": row["status"],
@@ -294,6 +303,10 @@ class RemoteStore:
                 raise RemoteError("跳板机用户名不能为空")
             if jump_port is None or not 1 <= jump_port <= 65535:
                 raise RemoteError("跳板机端口必须在 1..65535")
+            if _provider_token_username(jump_username):
+                # Old browser forms may still submit password mode; the
+                # provider token username is authoritative.
+                jump_auth_type = "none"
             if jump_auth_type not in ("none", "key", "password"):
                 raise RemoteError("跳板机认证方式只能是 none、key 或 password")
             if jump_auth_type == "key" and not jump_key_path:
@@ -467,7 +480,7 @@ class RemoteStore:
                     row["jump_host"],
                     int(row["jump_port"]),
                     row["jump_username"],
-                    row["jump_auth_type"],
+                    "none" if _provider_token_username(row["jump_username"]) else row["jump_auth_type"],
                     row.get("jump_key_path"),
                     secret.get("jump_password"),
                     secret.get("jump_passphrase"),
@@ -682,32 +695,26 @@ class RemoteBridge:
         err = stderr.read().decode("utf-8", errors="replace")
         if err.strip():
             raise RemoteError(f"remote workspace prepare failed: {err[:500]}")
-        sftp = self.client.open_sftp()
-        try:
-            for rel, content in cleaned.items():
-                target = f"{remote_dir}/{rel}"
-                parent = target.rsplit("/", 1)[0]
-                if not parent.startswith(remote_dir):
-                    continue
-                self._mkdirs(sftp, parent)
-                with sftp.file(target, "wb") as handle:
-                    handle.write(content.encode("utf-8"))
-        finally:
-            sftp.close()
-
-    @staticmethod
-    def _mkdirs(sftp, path: str) -> None:
-        parts = path.strip("/").split("/")
-        current = ""
-        for part in parts:
-            current += "/" + part
-            try:
-                sftp.stat(current)
-            except OSError:
-                try:
-                    sftp.mkdir(current)
-                except OSError:
-                    pass
+        # Do not depend on the remote SFTP subsystem.  Some restricted NPU
+        # containers expose SSH exec only; write files through the shell.
+        for rel, content in cleaned.items():
+            target = f"{remote_dir}/{rel}"
+            parent = target.rsplit("/", 1)[0]
+            if not parent.startswith(remote_dir):
+                continue
+            mkdir = self.client.exec_command(
+                f"mkdir -p {shlex.quote(parent)}", timeout=20, get_pty=False
+            )[1]
+            mkdir.channel.recv_exit_status()
+            stdin, stdout, stderr = self.client.exec_command(
+                f"cat > {shlex.quote(target)}", timeout=30, get_pty=False
+            )
+            stdin.write(content.encode("utf-8"))
+            stdin.channel.shutdown_write()
+            code = stdout.channel.recv_exit_status()
+            err = stderr.read().decode("utf-8", errors="replace")
+            if code != 0:
+                raise RemoteError(f"remote file upload failed for {rel}: {err[:300]}")
 
 
 class RemoteBridgeClient:
@@ -725,15 +732,26 @@ class RemoteBridgeClient:
             raise RemoteError("远程服务器未连接")
         token = row.get("bridge_token") or ""
         request = {"token": token, **payload}
-        try:
-            with socket.create_connection(("127.0.0.1", int(row["bridge_port"])), timeout=10) as conn:
-                conn.settimeout(timeout)
-                file = conn.makefile("rwb")
-                file.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
-                file.flush()
-                raw = file.readline(8 * 1024 * 1024)
-        except OSError as exc:
-            raise RemoteError(f"远程执行桥不可达: {exc}") from exc
+        last_error: Exception | None = None
+        raw = b""
+        for attempt in range(6):
+            try:
+                with socket.create_connection(("127.0.0.1", int(row["bridge_port"])), timeout=10) as conn:
+                    conn.settimeout(timeout)
+                    file = conn.makefile("rwb")
+                    file.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+                    file.flush()
+                    raw = file.readline(8 * 1024 * 1024)
+                break
+            except ConnectionRefusedError as exc:
+                last_error = exc
+                if attempt == 5:
+                    break
+                time.sleep(0.2)
+            except OSError as exc:
+                raise RemoteError(f"远程执行桥不可达: {exc}") from exc
+        if not raw and last_error is not None:
+            raise RemoteError(f"远程执行桥不可达: {last_error}")
         if not raw:
             raise RemoteError("远程执行桥没有返回结果")
         result = json.loads(raw.decode("utf-8"))

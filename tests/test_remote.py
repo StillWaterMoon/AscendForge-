@@ -133,7 +133,7 @@ class RemoteTests(unittest.TestCase):
             parse_ssh_connect_command("ssh -J bad root@example.com", "")
 
     def test_task_dir_is_confined(self):
-        self.assertTrue(_safe_task_dir("/tmp/af", "task_1").endswith("task_1"))
+        self.assertEqual(_safe_task_dir("/tmp/af/", "task_1"), "/tmp/af/task_1")
         with self.assertRaises(RemoteError):
             _safe_task_dir("/tmp/af", "../escape")
 
