@@ -254,6 +254,43 @@ function remoteFormValue(id) {
   return el ? el.value.trim() : '';
 }
 
+function setServerField(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value ?? '';
+}
+
+async function parseServerCommand() {
+  const errorBox = $('#server-error');
+  if (errorBox) errorBox.innerHTML = '';
+  try {
+    const data = await api('/api/remote/parse', {
+      method: 'POST',
+      body: {
+        command: document.getElementById('quick-ssh-command')?.value || '',
+        connection_password: document.getElementById('quick-connection-password')?.value || '',
+      },
+      idem: false,
+    });
+    const c = data.config || {};
+    setServerField('server-host', c.host);
+    setServerField('server-port', c.port);
+    setServerField('server-user', c.username);
+    setServerField('server-auth', c.auth_type || 'password');
+    setServerField('server-key', '');
+    setServerField('server-password', c.password || '');
+    setServerField('jump-host', c.jump_host || '');
+    setServerField('jump-port', c.jump_port || 22);
+    setServerField('jump-user', c.jump_username || '');
+    setServerField('jump-auth', c.jump_auth_type || 'password');
+    setServerField('jump-key', '');
+    setServerField('jump-password', c.jump_password || '');
+    setServerField('server-root', c.remote_root || '/tmp/ascendforge');
+    toast('已从官方命令填充连接信息', 'success');
+  } catch (err) {
+    if (errorBox) errorBox.innerHTML = `<div class="alert error">${esc(err.message || '解析失败')}</div>`;
+  }
+}
+
 async function serverAction(action, onSuccess) {
   const errorBox = $('#server-error');
   if (errorBox) errorBox.innerHTML = '';
@@ -1248,6 +1285,12 @@ async function renderConnections() {
         ${remote.status === 'connected' ? badge('已连接', 'completed') : remote.status === 'connecting' ? badge('连接中', 'pending') : remote.status === 'error' ? badge('连接失败', 'failed') : badge('未连接', 'pending')}</div>
       ${remote.last_error ? `<div class="alert error small" style="margin-bottom:12px">${esc(remote.last_error)}</div>` : ''}
       <form id="server-form" class="stack">
+        <div class="alert info small">官方 NPU 环境给的命令通常形如 <span class="mono">ssh -J user:password@jump:port root@target</span>，有效期约 5 分钟。把整条命令和连接密码粘贴到下面，点击“解析并填充”。</div>
+        <div class="field"><label for="quick-ssh-command">官方 SSH 连接命令</label><textarea id="quick-ssh-command" rows="3" placeholder="ssh -J jt_xxx:xxx@113.47.8.48:2234 root@179.62.58.131" style="width:100%;font-family:var(--mono)"></textarea></div>
+        <div class="form-grid">
+          <div class="field"><label for="quick-connection-password">连接密码</label><input id="quick-connection-password" type="password" autocomplete="new-password" placeholder="官方弹窗里的“连接密码”"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" id="parse-server-command" type="button">解析并填充</button></div>
+        </div>
         <div class="form-grid">
           <div class="field"><label for="server-host">主机</label><input id="server-host" value="${esc(remote.host || '')}" placeholder="192.0.2.10" required></div>
           <div class="field"><label for="server-port">SSH 端口</label><input id="server-port" type="number" value="${esc(remote.port || 22)}" required></div>
@@ -1355,6 +1398,8 @@ async function renderConnections() {
   $$('[data-server-action]').forEach((button) => {
     button.addEventListener('click', () => serverAction(button.dataset.serverAction, renderConnections));
   });
+  const parseCommand = $('#parse-server-command');
+  if (parseCommand) parseCommand.addEventListener('click', parseServerCommand);
 
 }
 

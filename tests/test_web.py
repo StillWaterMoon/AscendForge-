@@ -177,6 +177,18 @@ class WebTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "REMOTE_CONNECT_FAILED")
+        status, payload = self.client.request(
+            "POST",
+            "/api/remote/parse",
+            {
+                "command": "ssh -J jt_x:jump@113.47.8.48:2234 root@179.62.58.131",
+                "connection_password": "target",
+            },
+            csrf=self.csrf,
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["config"]["jump_port"], 2234)
+        self.assertEqual(payload["config"]["host"], "179.62.58.131")
 
     def test_04b_project_template_upload_and_create(self):
         fake = FakePlatform()

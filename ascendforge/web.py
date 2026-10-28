@@ -61,7 +61,14 @@ from .security import (
     setup_token_valid,
     verify_password,
 )
-from .remote import RemoteError, RemoteStore, close_ssh_client, start_bridge_process, stop_bridge_process
+from .remote import (
+    RemoteError,
+    RemoteStore,
+    close_ssh_client,
+    parse_ssh_connect_command,
+    start_bridge_process,
+    stop_bridge_process,
+)
 from .tasks import TaskError, TaskService
 from .util import canonical_json, json_dumps, json_loads, new_id, now, truncate_text
 from .workload_recovery import RecoveryError, WorkloadRecoveryService
@@ -227,6 +234,7 @@ class App:
             ("POST", r"^/api/platform/test$", "h_platform_test", False, False),
             ("POST", r"^/api/platform/disconnect$", "h_platform_disconnect", False, False),
             ("GET", r"^/api/remote/status$", "h_remote_status", False, True),
+            ("POST", r"^/api/remote/parse$", "h_remote_parse", False, False),
             ("POST", r"^/api/remote/test$", "h_remote_test", False, False),
             ("POST", r"^/api/remote/connect$", "h_remote_connect", False, False),
             ("POST", r"^/api/remote/disconnect$", "h_remote_disconnect", False, False),
@@ -1214,6 +1222,17 @@ class Handler(BaseHTTPRequestHandler):
     # ==================================================================
     def h_remote_status(self, **_: Any):
         return 200, {"remote": self.app.remote.public()}
+
+    def h_remote_parse(self, **_: Any):
+        body = self._read_json()
+        try:
+            config = parse_ssh_connect_command(
+                str(body.get("command") or ""),
+                str(body.get("connection_password") or ""),
+            )
+        except RemoteError as exc:
+            raise ApiError(400, "REMOTE_COMMAND_INVALID", str(exc)) from None
+        return 200, {"config": config}
 
     def h_remote_test(self, **_: Any):
         body = self._read_json()

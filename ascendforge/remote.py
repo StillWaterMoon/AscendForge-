@@ -83,6 +83,122 @@ def _pid_alive(pid: int | None) -> bool:
         return False
 
 
+def parse_ssh_connect_command(command: str, connection_password: str) -> dict:
+    """Parse the provider's one-line SSH command + separate connection password.
+
+    Expected shape:
+        ssh -J user:password@jump:port root@target
+
+    The connection password is the target account password; the password inside
+    ``-J`` belongs to the jump host.  The command is only parsed in memory; it is
+    not persisted or logged.
+    """
+    import shlex
+
+    try:
+        tokens = shlex.split(str(command or ""))
+    except ValueError as exc:
+        raise RemoteError(f"SSH 命令无法解析：{exc}") from None
+    if not tokens or tokens[0].lower() != "ssh":
+        raise RemoteError("连接命令必须以 ssh 开头")
+    jump_spec = None
+    target_port = None
+    target_token = None
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-J":
+            if index + 1 >= len(tokens):
+                raise RemoteError("-J 后面缺少跳板机")
+            jump_spec = tokens[index + 1]
+            index += 2
+            continue
+        if token == "-p":
+            if index + 1 >= len(tokens):
+                raise RemoteError("-p 后面缺少端口")
+            try:
+                target_port = int(tokens[index + 1])
+            except ValueError:
+                raise RemoteError("目标端口必须是数字") from None
+            index += 2
+            continue
+        if token in ("-o", "-i", "-l", "-F"):
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        target_token = token
+        index += 1
+    if not target_token:
+        raise RemoteError("命令里没有目标服务器")
+    if not connection_password:
+        raise RemoteError("连接密码不能为空")
+
+    def split_host_port(value: str) -> tuple[str, int | None]:
+        if value.startswith("["):
+            # IPv6 form [addr]:port
+            end = value.find("]")
+            if end < 0:
+                return value, None
+            host = value[1:end]
+            rest = value[end + 1 :]
+            if rest.startswith(":") and rest[1:].isdigit():
+                return host, int(rest[1:])
+            return host, None
+        if value.count(":") == 1:
+            host, maybe_port = value.rsplit(":", 1)
+            if maybe_port.isdigit():
+                return host, int(maybe_port)
+        return value, None
+
+    def split_user(value: str) -> tuple[str | None, str]:
+        if "@" in value:
+            return tuple(value.rsplit("@", 1))  # type: ignore[return-value]
+        return None, value
+
+    jump_user = jump_password = None
+    jump_host = jump_port = None
+    if jump_spec:
+        jump_userinfo, jump_hostport = split_user(jump_spec)
+        if jump_userinfo and ":" in jump_userinfo:
+            jump_user, jump_password = jump_userinfo.split(":", 1)
+        else:
+            jump_user = jump_userinfo
+        jump_host, jump_port = split_host_port(jump_hostport)
+        if not jump_host or not jump_user:
+            raise RemoteError("跳板机格式应为 user:password@host:port")
+        if jump_port is None:
+            jump_port = 22
+
+    target_user, target_hostport = split_user(target_token)
+    target_host, embedded_port = split_host_port(target_hostport)
+    if not target_host:
+        raise RemoteError("目标服务器地址为空")
+    if embedded_port is not None:
+        target_port = embedded_port
+    if target_port is None:
+        target_port = 22
+    if not 1 <= target_port <= 65535:
+        raise RemoteError("目标端口必须在 1..65535")
+    if not target_user:
+        target_user = "root"
+    return {
+        "host": target_host,
+        "port": target_port,
+        "username": target_user,
+        "auth_type": "password",
+        "password": connection_password,
+        "remote_root": "/tmp/ascendforge",
+        "jump_host": jump_host,
+        "jump_port": jump_port,
+        "jump_username": jump_user,
+        "jump_auth_type": "password" if jump_host else None,
+        "jump_key_path": None,
+        "jump_password": jump_password,
+    }
+
+
 def close_ssh_client(client) -> None:
     if not client:
         return

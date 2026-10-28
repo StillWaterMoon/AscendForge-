@@ -8,6 +8,7 @@ from ascendforge.remote import (
     RemoteError,
     RemoteStore,
     _safe_task_dir,
+    parse_ssh_connect_command,
 )
 from ascendforge.security import SecretBox, load_master_key
 from tests.helpers import make_env
@@ -93,6 +94,24 @@ class RemoteTests(unittest.TestCase):
         ])
         self.assertEqual(REMOTE_TOOL_SPEC["name"], "remote_exec")
         self.assertEqual(REMOTE_TOOL_SPEC["inputSchema"]["required"], ["command"])
+
+    def test_parse_official_ssh_command(self):
+        parsed = parse_ssh_connect_command(
+            "ssh -J jt_ABC:jump-secret@113.47.8.48:2234 root@179.62.58.131",
+            "target-secret",
+        )
+        self.assertEqual(parsed["host"], "179.62.58.131")
+        self.assertEqual(parsed["port"], 22)
+        self.assertEqual(parsed["username"], "root")
+        self.assertEqual(parsed["password"], "target-secret")
+        self.assertEqual(parsed["jump_host"], "113.47.8.48")
+        self.assertEqual(parsed["jump_port"], 2234)
+        self.assertEqual(parsed["jump_username"], "jt_ABC")
+        self.assertEqual(parsed["jump_password"], "jump-secret")
+        with self.assertRaises(RemoteError):
+            parse_ssh_connect_command("bash root@example.com", "x")
+        with self.assertRaises(RemoteError):
+            parse_ssh_connect_command("ssh -J bad root@example.com", "")
 
     def test_task_dir_is_confined(self):
         self.assertTrue(_safe_task_dir("/tmp/af", "task_1").endswith("task_1"))
