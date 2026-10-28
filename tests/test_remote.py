@@ -37,6 +37,28 @@ class RemoteTests(unittest.TestCase):
         self.assertNotIn("super-secret-ssh-password", ciphertext)
         self.assertEqual(self.store.secret()["password"], "super-secret-ssh-password")
 
+    def test_jump_host_configuration_is_public_without_secret(self):
+        public = self.store.save(
+            {
+                "host": "179.62.58.131",
+                "port": 22,
+                "username": "root",
+                "auth_type": "key",
+                "key_path": "C:/Users/test/.ssh/id_ed25519",
+                "remote_root": "/tmp/ascendforge",
+                "jump_host": "113.47.8.48",
+                "jump_port": 2234,
+                "jump_username": "jt_test",
+                "jump_auth_type": "password",
+                "jump_password": "jump-secret",
+            }
+        )
+        self.assertEqual(public["jump_host"], "113.47.8.48")
+        self.assertEqual(public["jump_port"], 2234)
+        self.assertEqual(public["jump_username"], "jt_test")
+        self.assertNotIn("jump_password", public)
+        self.assertEqual(self.store.secret()["jump_password"], "jump-secret")
+
     def test_key_auth_requires_key_path(self):
         with self.assertRaises(RemoteError):
             self.store.save(

@@ -61,7 +61,7 @@ from .security import (
     setup_token_valid,
     verify_password,
 )
-from .remote import RemoteError, RemoteStore, start_bridge_process, stop_bridge_process
+from .remote import RemoteError, RemoteStore, close_ssh_client, start_bridge_process, stop_bridge_process
 from .tasks import TaskError, TaskService
 from .util import canonical_json, json_dumps, json_loads, new_id, now, truncate_text
 from .workload_recovery import RecoveryError, WorkloadRecoveryService
@@ -1226,7 +1226,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 client.exec_command("true", timeout=10)[1].channel.recv_exit_status()
             finally:
-                client.close()
+                close_ssh_client(client)
         except RemoteError as exc:
             raise ApiError(400, "REMOTE_CONNECT_FAILED", str(exc)) from None
         except Exception as exc:

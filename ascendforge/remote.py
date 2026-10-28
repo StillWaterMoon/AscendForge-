@@ -83,6 +83,21 @@ def _pid_alive(pid: int | None) -> bool:
         return False
 
 
+def close_ssh_client(client) -> None:
+    if not client:
+        return
+    jump = getattr(client, "_jump_client", None)
+    try:
+        client.close()
+    except Exception:
+        pass
+    if jump:
+        try:
+            jump.close()
+        except Exception:
+            pass
+
+
 def _public(row: dict | None) -> dict | None:
     if not row:
         return None
@@ -93,6 +108,11 @@ def _public(row: dict | None) -> dict | None:
         "username": row["username"],
         "auth_type": row["auth_type"],
         "key_path": row.get("key_path"),
+        "jump_host": row.get("jump_host"),
+        "jump_port": row.get("jump_port"),
+        "jump_username": row.get("jump_username"),
+        "jump_auth_type": row.get("jump_auth_type"),
+        "jump_key_path": row.get("jump_key_path"),
         "remote_root": row["remote_root"],
         "status": row["status"],
         "pid": row.get("pid"),
@@ -146,28 +166,62 @@ class RemoteStore:
         if not remote_root.startswith("/") or remote_root == "/":
             raise RemoteError("remote_root 必须是绝对路径，且不能是根目录")
         key_path = str(payload.get("key_path") or "").strip() or None
+        jump_host = str(payload.get("jump_host") or "").strip() or None
+        jump_username = str(payload.get("jump_username") or "").strip() or None
+        jump_auth_type = str(payload.get("jump_auth_type") or "password").strip()
+        jump_key_path = str(payload.get("jump_key_path") or "").strip() or None
+        try:
+            jump_port = int(payload.get("jump_port") or 22) if jump_host else None
+        except (TypeError, ValueError):
+            raise RemoteError("跳板机端口必须是数字") from None
+        if jump_host:
+            if not jump_username:
+                raise RemoteError("跳板机用户名不能为空")
+            if jump_port is None or not 1 <= jump_port <= 65535:
+                raise RemoteError("跳板机端口必须在 1..65535")
+            if jump_auth_type not in ("key", "password"):
+                raise RemoteError("跳板机认证方式只能是 key 或 password")
+            if jump_auth_type == "key" and not jump_key_path:
+                raise RemoteError("跳板机 key 认证需要填写私钥路径")
         password = payload.get("password")
         passphrase = payload.get("passphrase")
+        jump_password = payload.get("jump_password")
+        jump_passphrase = payload.get("jump_passphrase")
         secret = self.secret()
         if isinstance(password, str) and password:
             secret["password"] = password
         if isinstance(passphrase, str) and passphrase:
             secret["passphrase"] = passphrase
+        if isinstance(jump_password, str) and jump_password:
+            secret["jump_password"] = jump_password
+        if isinstance(jump_passphrase, str) and jump_passphrase:
+            secret["jump_passphrase"] = jump_passphrase
         if auth_type == "password" and not secret.get("password"):
             raise RemoteError("password 认证需要填写密码")
         if auth_type == "key" and not key_path:
             raise RemoteError("key 认证需要填写 key_path")
+        if jump_host and jump_auth_type == "password" and not secret.get("jump_password"):
+            raise RemoteError("跳板机密码认证需要填写密码")
         if secret:
             CredentialStore(self.db, self.box).put(REMOTE_SECRET_KIND, secret)
         current = now()
         self.db.execute(
             "INSERT INTO remote_servers(id, host, port, username, auth_type, key_path, "
-            "remote_root, status, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, 'disconnected', ?, ?) "
+            "jump_host, jump_port, jump_username, jump_auth_type, jump_key_path, "
+            "remote_root, status, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'disconnected', ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET host=excluded.host, port=excluded.port, "
             "username=excluded.username, auth_type=excluded.auth_type, key_path=excluded.key_path, "
+            "jump_host=excluded.jump_host, jump_port=excluded.jump_port, "
+            "jump_username=excluded.jump_username, jump_auth_type=excluded.jump_auth_type, "
+            "jump_key_path=excluded.jump_key_path, "
             "remote_root=excluded.remote_root, status='disconnected', pid=NULL, bridge_port=NULL, "
             "bridge_token=NULL, last_error=NULL, updated_at=excluded.updated_at",
-            (REMOTE_ID, host, port, username, auth_type, key_path, remote_root, current, current),
+            (
+                REMOTE_ID, host, port, username, auth_type, key_path,
+                jump_host, jump_port, jump_username, jump_auth_type, jump_key_path,
+                remote_root, current, current,
+            ),
         )
         return self.public()
 
@@ -177,28 +231,85 @@ class RemoteStore:
             raise RemoteError("尚未配置远程服务器")
         secret = self.secret()
         paramiko = _paramiko()
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        kwargs: dict[str, Any] = {
-            "hostname": row["host"],
-            "port": int(row["port"]),
-            "username": row["username"],
-            "timeout": timeout,
-            "banner_timeout": timeout,
-            "auth_timeout": timeout,
-            "allow_agent": True,
-            "look_for_keys": True,
-        }
-        if row["auth_type"] == "password":
-            kwargs["password"] = secret.get("password") or ""
-        else:
-            kwargs["key_filename"] = row.get("key_path")
-            if secret.get("passphrase"):
-                kwargs["passphrase"] = secret["passphrase"]
-        client.connect(**kwargs)
-        transport = client.get_transport()
-        if transport is not None:
-            transport.set_keepalive(30)
+
+        def make_client(
+            host: str,
+            port: int,
+            username: str,
+            auth_type: str,
+            key_path: str | None,
+            password: str | None,
+            passphrase: str | None,
+            sock=None,
+        ):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            kwargs: dict[str, Any] = {
+                "hostname": host,
+                "port": int(port),
+                "username": username,
+                "timeout": timeout,
+                "banner_timeout": timeout,
+                "auth_timeout": timeout,
+                "allow_agent": True,
+                "look_for_keys": True,
+            }
+            if sock is not None:
+                kwargs["sock"] = sock
+            if auth_type == "password":
+                kwargs["password"] = password or ""
+            else:
+                kwargs["key_filename"] = key_path
+                if passphrase:
+                    kwargs["passphrase"] = passphrase
+            client.connect(**kwargs)
+            transport = client.get_transport()
+            if transport is not None:
+                transport.set_keepalive(30)
+            return client
+
+        jump_client = None
+        channel = None
+        if row.get("jump_host"):
+            try:
+                jump_client = make_client(
+                    row["jump_host"],
+                    int(row["jump_port"]),
+                    row["jump_username"],
+                    row["jump_auth_type"],
+                    row.get("jump_key_path"),
+                    secret.get("jump_password"),
+                    secret.get("jump_passphrase"),
+                )
+                transport = jump_client.get_transport()
+                if transport is None:
+                    raise RemoteError("跳板机 SSH transport 不可用")
+                channel = transport.open_channel(
+                    "direct-tcpip",
+                    (row["host"], int(row["port"])),
+                    ("127.0.0.1", 0),
+                )
+            except Exception:
+                if jump_client:
+                    jump_client.close()
+                raise
+        try:
+            client = make_client(
+                row["host"],
+                int(row["port"]),
+                row["username"],
+                row["auth_type"],
+                row.get("key_path"),
+                secret.get("password"),
+                secret.get("passphrase"),
+                sock=channel,
+            )
+        except Exception:
+            if jump_client:
+                jump_client.close()
+            raise
+        client._jump_client = jump_client
+        client._jump_channel = channel
         return client
 
     def set_status(self, **fields: Any) -> None:
@@ -267,10 +378,7 @@ class RemoteBridge:
                 pass
             self.server = None
         if self.client:
-            try:
-                self.client.close()
-            except Exception:
-                pass
+            close_ssh_client(self.client)
             self.client = None
         try:
             self.store.set_status(

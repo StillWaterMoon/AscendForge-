@@ -25,6 +25,36 @@ Codex 仍然运行在 AscendForge 宿主机上，但可以通过一条受控通�
 - 私钥路径
 - 远程工作目录
 - 密码（仅密码认证，留空保持旧值）
+- 跳板机（可选）：主机、端口、用户名、认证方式、私钥、密码
+
+跳板机对应 OpenSSH 的：
+
+```bash
+ssh -J jump_user@jump_host:jump_port root@target
+```
+
+应用内不解析 `user:password@host:port` 这种字符串；跳板机密码填在单独的“跳板机密码”字段。
+
+例如：
+
+```bash
+ssh -J jump_user:jump_password@113.47.8.48:2234 root@179.62.58.131
+```
+
+网页填写：
+
+```text
+主机                179.62.58.131
+SSH 端口            22
+用户名              root
+认证方式            按目标机实际的 key/密码
+跳板机主机          113.47.8.48
+跳板机端口          2234
+跳板机用户名        jump_user
+跳板机认证          密码
+跳板机密码          jump_password
+远程工作目录        /tmp/ascendforge
+```
 
 “测试连接”只做 SSH 握手和 `true`；“连接”启动常驻 `remote-bridge` 进程并保持 SSH 连接。
 

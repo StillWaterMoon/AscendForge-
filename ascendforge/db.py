@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -159,6 +159,11 @@ CREATE TABLE IF NOT EXISTS remote_servers (
     username TEXT NOT NULL,
     auth_type TEXT NOT NULL DEFAULT 'key',
     key_path TEXT,
+    jump_host TEXT,
+    jump_port INTEGER,
+    jump_username TEXT,
+    jump_auth_type TEXT,
+    jump_key_path TEXT,
     remote_root TEXT NOT NULL DEFAULT '/tmp/ascendforge',
     status TEXT NOT NULL DEFAULT 'disconnected',
     bridge_port INTEGER,
@@ -435,6 +440,13 @@ class Database:
             "workload_recovery_jobs": {
                 "base_attempt_id": "TEXT",
                 "base_snapshot_id": "TEXT",
+            },
+            "remote_servers": {
+                "jump_host": "TEXT",
+                "jump_port": "INTEGER",
+                "jump_username": "TEXT",
+                "jump_auth_type": "TEXT",
+                "jump_key_path": "TEXT",
             },
             "submissions": {
                 "diagnostic": "INTEGER NOT NULL DEFAULT 0",
